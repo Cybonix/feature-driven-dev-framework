@@ -32,9 +32,10 @@ print_usage() {
     list_commands
     echo ""
     echo "Options:"
-    echo "  --list       Show all available commands"
-    echo "  --dry-run    Show what would be executed without running"
-    echo "  --help, -h   Show this help message"
+    echo "  --list          Show all available commands"
+    echo "  --dry-run       Show what would be executed without running"
+    echo "  --platform-info Show platform detection information"
+    echo "  --help, -h      Show this help message"
 }
 
 list_commands() {
@@ -64,7 +65,18 @@ PYEOF
 
 get_command() {
     local task_name="$1"
-    get_ops_config "commands.$task_name"
+    local cmd=$(get_ops_config "commands.$task_name")
+
+    # If command is not defined or is a placeholder, try platform defaults
+    if [[ -z "$cmd" ]] || [[ "$cmd" == echo* && "$cmd" == *"No"*"defined"* ]]; then
+        local platform_cmd=$(get_platform_default_command "$task_name")
+        if [[ -n "$platform_cmd" ]]; then
+            echo "$platform_cmd"
+            return 0
+        fi
+    fi
+
+    echo "$cmd"
 }
 
 # Parse arguments
@@ -82,6 +94,10 @@ while [[ "$#" -gt 0 ]]; do
         --dry-run)
             DRY_RUN=true
             shift
+            ;;
+        --platform-info)
+            print_platform_info
+            exit 0
             ;;
         --help|-h)
             print_usage

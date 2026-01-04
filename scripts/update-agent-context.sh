@@ -51,21 +51,71 @@ try:
     print("")
     print("### Project")
     project = config.get('project', {})
+    project_type = project.get('type', 'library')
     print(f"- **Language**: {project.get('language', 'generic')}")
     print(f"- **Framework**: {project.get('framework', 'none')}")
-    print(f"- **Type**: {project.get('type', 'library')}")
+    print(f"- **Type**: {project_type}")
+
+    # Determine platform category
+    if project_type in ['android', 'ios', 'react-native', 'flutter']:
+        platform_category = 'mobile'
+    elif project_type in ['frontend', 'pwa']:
+        platform_category = 'frontend'
+    else:
+        platform_category = 'backend'
+    print(f"- **Platform**: {platform_category}")
     print("")
+
+    # Mobile-specific configuration
+    platform_config = project.get('platform', {})
+    if platform_config and project_type in ['android', 'ios', 'react-native', 'flutter']:
+        print("### Mobile Configuration")
+        if platform_config.get('target_sdk'):
+            print(f"- **Target SDK**: {platform_config.get('target_sdk')}")
+        if platform_config.get('min_sdk'):
+            print(f"- **Min SDK**: {platform_config.get('min_sdk')}")
+        if platform_config.get('deployment_target'):
+            print(f"- **iOS Deployment Target**: {platform_config.get('deployment_target')}")
+        if platform_config.get('bundle_id'):
+            print(f"- **Bundle ID**: {platform_config.get('bundle_id')}")
+        if platform_config.get('flutter_version'):
+            print(f"- **Flutter Version**: {platform_config.get('flutter_version')}")
+        print("")
 
     print("### Commands (use `scripts/run-task.sh <task>`)")
     print("```")
     commands = config.get('commands', {})
     has_real_commands = False
-    for name, cmd in commands.items():
-        # Skip placeholder commands
-        if "No " in cmd and " defined" in cmd:
-            continue
-        print(f"{name}: {cmd}")
-        has_real_commands = True
+
+    # Group commands by category
+    core_commands = ['setup', 'lint', 'test', 'build', 'start']
+    mobile_commands = ['build_android', 'build_ios', 'deploy_testflight', 'deploy_play_store', 'deploy_firebase']
+    frontend_commands = ['lighthouse', 'bundle_analyze', 'visual_test', 'e2e']
+
+    # Show core commands
+    for name in core_commands:
+        if name in commands:
+            cmd = commands[name]
+            if "No " not in cmd or " defined" not in cmd:
+                print(f"{name}: {cmd}")
+                has_real_commands = True
+
+    # Show platform-specific commands
+    if project_type in ['android', 'ios', 'react-native', 'flutter']:
+        for name in mobile_commands:
+            if name in commands:
+                cmd = commands[name]
+                if "No " not in cmd or " defined" not in cmd:
+                    print(f"{name}: {cmd}")
+                    has_real_commands = True
+    elif project_type in ['frontend', 'pwa']:
+        for name in frontend_commands:
+            if name in commands:
+                cmd = commands[name]
+                if "No " not in cmd or " defined" not in cmd:
+                    print(f"{name}: {cmd}")
+                    has_real_commands = True
+
     if not has_real_commands:
         print("# Commands not yet configured")
     print("```")
@@ -84,10 +134,22 @@ try:
     security = config.get('security', {})
     sast = security.get('sast', {})
     secrets = security.get('secrets', {})
+    mobile_security = security.get('mobile', {})
+    frontend_security = security.get('frontend', {})
+
     if sast:
         print(f"- SAST: `{sast.get('tool', 'trivy')}` - fails on {sast.get('fail_on', 'high,critical')}")
     if secrets:
         print(f"- Secrets: `{secrets.get('tool', 'gitleaks')}` - fails on {secrets.get('fail_on', 'any')}")
+
+    # Platform-specific security
+    if project_type in ['android', 'ios', 'react-native', 'flutter'] and mobile_security:
+        print(f"- Mobile SAST: `{mobile_security.get('tool', 'mobsf')}` - fails on {mobile_security.get('fail_on', 'high,critical')}")
+    if project_type in ['frontend', 'pwa'] and frontend_security:
+        if frontend_security.get('npm_audit'):
+            print(f"- NPM Audit: enabled")
+        if frontend_security.get('lighthouse_threshold'):
+            print(f"- Lighthouse: minimum score {frontend_security.get('lighthouse_threshold')}")
     print("")
 
 except Exception as e:

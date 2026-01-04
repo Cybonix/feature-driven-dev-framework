@@ -1,0 +1,283 @@
+# iOS CI/CD Pipeline for GitLab
+# Requires GitLab Runner on macOS
+# Includes: lint, test, security scan, build, sign, and deploy
+
+stages:
+    - validate
+    - test
+    - security
+    - build
+    - deploy
+
+variables:
+    XCODE_VERSION: "15.2"
+    IOS_SIMULATOR: "iPhone 15"
+    IOS_VERSION: "17.2"
+
+# Base iOS job - requires macOS runner
+.ios_base:
+    tags:
+        - macos
+        - xcode
+    before_script:
+        - sudo xcode-select -s /Applications/Xcode_${XCODE_VERSION}.app
+        - |
+            if [ -f "Podfile" ]; then
+                pod install
+            fi
+
+# Cache CocoaPods
+.cocoapods_cache: &cocoapods_cache
+    cache:
+        key: pods-${CI_COMMIT_REF_SLUG}
+        paths:
+            - Pods/
+            - .cocoapods/
+        policy: pull-push
+
+# ============================================================================
+# VALIDATE STAGE
+# ============================================================================
+swiftlint:
+    stage: validate
+    extends: .ios_base
+    script:
+        - brew install swiftlint || true
+        - swiftlint lint --strict --reporter checkstyle > swiftlint-report.xml || true
+    artifacts:
+        when: always
+        paths:
+            - swiftlint-report.xml
+        reports:
+            codequality: swiftlint-report.xml
+        expire_in: 1 week
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+swift_format:
+    stage: validate
+    extends: .ios_base
+    script:
+        - brew install swift-format || true
+        - swift-format lint --recursive . || echo "Format issues found"
+    allow_failure: true
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+unit_tests:
+    stage: test
+    extends: .ios_base
+    <<: *cocoapods_cache
+    script:
+        - |
+            xcodebuild test \
+                -workspace *.xcworkspace \
+                -scheme App \
+                -destination "platform=iOS Simulator,name=${IOS_SIMULATOR},OS=${IOS_VERSION}" \
+                -resultBundlePath TestResults.xcresult \
+                -enableCodeCoverage YES \
+                CODE_SIGNING_ALLOWED=NO || \
+            xcodebuild test \
+                -project *.xcodeproj \
+                -scheme App \
+                -destination "platform=iOS Simulator,name=${IOS_SIMULATOR},OS=${IOS_VERSION}" \
+                -resultBundlePath TestResults.xcresult \
+                -enableCodeCoverage YES \
+                CODE_SIGNING_ALLOWED=NO
+        - xcrun xccov view --report TestResults.xcresult > coverage.txt || true
+    artifacts:
+        when: always
+        paths:
+            - TestResults.xcresult/
+            - coverage.txt
+        expire_in: 1 week
+    coverage: '/Lines: ([0-9.]+)%/'
+
+ui_tests:
+    stage: test
+    extends: .ios_base
+    <<: *cocoapods_cache
+    script:
+        - |
+            xcodebuild test \
+                -workspace *.xcworkspace \
+                -scheme AppUITests \
+                -destination "platform=iOS Simulator,name=${IOS_SIMULATOR},OS=${IOS_VERSION}" \
+                CODE_SIGNING_ALLOWED=NO || echo "UI tests not configured"
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    allow_failure: true
+
+# ============================================================================
+# SECURITY STAGE
+# ============================================================================
+gitleaks:
+    stage: security
+    image:
+        name: zricethezav/gitleaks:latest
+        entrypoint: [""]
+    tags:
+        - docker
+    script:
+        - gitleaks detect --source . --verbose --no-git
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+trivy_scan:
+    stage: security
+    image:
+        name: aquasec/trivy:latest
+        entrypoint: [""]
+    tags:
+        - docker
+    script:
+        - trivy fs . --exit-code 1 --severity HIGH,CRITICAL --no-progress
+    allow_failure: false
+
+secrets_check:
+    stage: security
+    extends: .ios_base
+    script:
+        - |
+            if grep -rE "(api[_-]?key|secret|password|token)\s*[:=]\s*[\"'][^\"']+[\"']" --include="*.swift" .; then
+                echo "Warning: Potential hardcoded secrets found"
+                exit 1
+            fi
+    allow_failure: true
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+build_debug:
+    stage: build
+    extends: .ios_base
+    <<: *cocoapods_cache
+    script:
+        - |
+            xcodebuild build \
+                -workspace *.xcworkspace \
+                -scheme App \
+                -configuration Debug \
+                -destination "platform=iOS Simulator,name=${IOS_SIMULATOR}" \
+                CODE_SIGNING_ALLOWED=NO || \
+            xcodebuild build \
+                -project *.xcodeproj \
+                -scheme App \
+                -configuration Debug \
+                -destination "platform=iOS Simulator,name=${IOS_SIMULATOR}" \
+                CODE_SIGNING_ALLOWED=NO
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build_release:
+    stage: build
+    extends: .ios_base
+    <<: *cocoapods_cache
+    script:
+        # Import certificates
+        - security create-keychain -p "" build.keychain
+        - security default-keychain -s build.keychain
+        - security unlock-keychain -p "" build.keychain
+        - echo "$IOS_CERTIFICATE_BASE64" | base64 -d > certificate.p12
+        - security import certificate.p12 -k build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        - security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+        - rm certificate.p12
+
+        # Install provisioning profile
+        - mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+        - echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+
+        # Build archive
+        - |
+            xcodebuild archive \
+                -workspace *.xcworkspace \
+                -scheme App \
+                -archivePath build/App.xcarchive \
+                -destination "generic/platform=iOS" \
+                -allowProvisioningUpdates || \
+            xcodebuild archive \
+                -project *.xcodeproj \
+                -scheme App \
+                -archivePath build/App.xcarchive \
+                -destination "generic/platform=iOS" \
+                -allowProvisioningUpdates
+
+        # Export IPA
+        - |
+            cat > ExportOptions.plist << EOF
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>method</key>
+                <string>app-store</string>
+                <key>teamID</key>
+                <string>${APPLE_TEAM_ID}</string>
+            </dict>
+            </plist>
+            EOF
+
+        - |
+            xcodebuild -exportArchive \
+                -archivePath build/App.xcarchive \
+                -exportPath build/ipa \
+                -exportOptionsPlist ExportOptions.plist
+
+        # Cleanup
+        - security delete-keychain build.keychain
+    artifacts:
+        paths:
+            - build/App.xcarchive/
+            - build/ipa/
+        expire_in: 4 weeks
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+# ============================================================================
+# DEPLOY STAGE
+# ============================================================================
+deploy_firebase:
+    stage: deploy
+    image: node:20
+    tags:
+        - docker
+    before_script:
+        - npm install -g firebase-tools
+    script:
+        - |
+            firebase appdistribution:distribute \
+                build/ipa/*.ipa \
+                --app $FIREBASE_IOS_APP_ID \
+                --groups "testers" \
+                --token "$FIREBASE_TOKEN"
+    dependencies:
+        - build_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "develop"'
+    environment:
+        name: firebase-distribution
+
+deploy_testflight:
+    stage: deploy
+    extends: .ios_base
+    script:
+        # Use App Store Connect API
+        - |
+            xcrun altool --upload-app \
+                --type ios \
+                --file build/ipa/*.ipa \
+                --apiKey "$APPSTORE_KEY_ID" \
+                --apiIssuer "$APPSTORE_ISSUER_ID"
+    dependencies:
+        - build_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    environment:
+        name: testflight

@@ -85,6 +85,54 @@ When creating this spec from a user prompt:
 
 ---
 
+## Platform Requirements *(include if mobile or cross-platform)*
+
+### Target Platforms
+- [ ] Android (Minimum API Level: ___)
+- [ ] iOS (Minimum Version: ___)
+- [ ] Web (PWA Support: Yes/No)
+- [ ] Desktop (Platforms: ___)
+
+### Device Requirements
+- **Screen Sizes**: [phone only, phone + tablet, responsive to all sizes]
+- **Orientation**: [portrait only, landscape only, both]
+- **Offline Support**: [required, nice-to-have, not needed]
+- **Background Processing**: [required, not needed]
+
+### Platform-Specific Behaviors
+*Remove platforms not applicable to this feature*
+- **Android**: [e.g., back button handling, notification channels, widgets]
+- **iOS**: [e.g., swipe gestures, haptic feedback, app clips]
+- **Web**: [e.g., keyboard shortcuts, drag-and-drop, PWA install prompt]
+
+### App Store Requirements *(include for mobile apps)*
+- **Age Rating**: [4+, 9+, 12+, 17+]
+- **Required Permissions**: [camera, location, notifications, contacts, etc.]
+- **Privacy Labels / Data Safety**: [data types collected, usage purposes]
+- **In-App Purchases**: [none, consumables, subscriptions]
+
+---
+
+## UI/UX Requirements *(include for frontend/mobile)*
+
+### Accessibility
+- [ ] Screen reader support (VoiceOver / TalkBack)
+- [ ] Minimum touch target size (44x44 pt iOS, 48x48 dp Android)
+- [ ] Sufficient color contrast (WCAG AA minimum)
+- [ ] Keyboard navigation support (web)
+- [ ] Reduced motion support
+
+### Responsive Design *(web/PWA only)*
+- **Breakpoints**: [mobile, tablet, desktop sizes]
+- **Critical Path**: [what must work on smallest screen]
+
+### Performance Expectations
+- **App Launch**: [target cold start time, e.g., <2 seconds]
+- **Screen Transitions**: [target animation frame rate, e.g., 60fps]
+- **Network Requests**: [timeout expectations, offline behavior]
+
+---
+
 ## Review & Acceptance Checklist
 *GATE: Automated checks run during main() execution*
 

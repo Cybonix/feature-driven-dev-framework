@@ -1,0 +1,387 @@
+# Flutter CI/CD Pipeline
+# Triggers on changes to Flutter-related files
+# Includes: lint, test, security scan, build (Android + iOS), and deploy
+
+name: flutter-ci
+
+on:
+    push:
+        branches: ["main", "develop"]
+        paths:
+            - "lib/**"
+            - "test/**"
+            - "pubspec.*"
+            - "android/**"
+            - "ios/**"
+            - "web/**"
+    pull_request:
+        branches: ["main", "develop"]
+        paths:
+            - "lib/**"
+            - "test/**"
+            - "pubspec.*"
+            - "android/**"
+            - "ios/**"
+            - "web/**"
+
+env:
+    FLUTTER_VERSION: "3.16.0"
+    JAVA_VERSION: "17"
+
+jobs:
+    validate:
+        name: Lint & Format
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Flutter
+              uses: subosito/flutter-action@v2
+              with:
+                  flutter-version: ${{ env.FLUTTER_VERSION }}
+                  channel: "stable"
+                  cache: true
+
+            - name: Install Dependencies
+              run: flutter pub get
+
+            - name: Analyze Code
+              run: flutter analyze --fatal-infos
+
+            - name: Check Formatting
+              run: dart format --set-exit-if-changed .
+
+            - name: Run Custom Lints (if configured)
+              run: |
+                  if grep -q "custom_lint" pubspec.yaml; then
+                      dart run custom_lint
+                  fi
+              continue-on-error: true
+
+    test:
+        name: Unit & Widget Tests
+        runs-on: ubuntu-latest
+        needs: validate
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Flutter
+              uses: subosito/flutter-action@v2
+              with:
+                  flutter-version: ${{ env.FLUTTER_VERSION }}
+                  channel: "stable"
+                  cache: true
+
+            - name: Install Dependencies
+              run: flutter pub get
+
+            - name: Run Tests with Coverage
+              run: flutter test --coverage
+
+            - name: Upload Coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  files: coverage/lcov.info
+                  fail_ci_if_error: false
+
+            - name: Generate Coverage Report
+              run: |
+                  flutter pub global activate coverage
+                  flutter pub global run coverage:format_coverage \
+                      --lcov \
+                      --in=coverage \
+                      --out=coverage/lcov.info \
+                      --report-on=lib
+
+            - name: Upload Coverage Report
+              uses: actions/upload-artifact@v4
+              with:
+                  name: coverage-report
+                  path: coverage/
+
+    integration-tests:
+        name: Integration Tests
+        runs-on: macos-14
+        needs: test
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Flutter
+              uses: subosito/flutter-action@v2
+              with:
+                  flutter-version: ${{ env.FLUTTER_VERSION }}
+                  channel: "stable"
+                  cache: true
+
+            - name: Install Dependencies
+              run: flutter pub get
+
+            - name: Run Integration Tests
+              run: |
+                  if [ -d "integration_test" ]; then
+                      flutter test integration_test
+                  else
+                      echo "No integration tests found, skipping"
+                  fi
+
+    security:
+        name: Security Scan
+        runs-on: ubuntu-latest
+        needs: test
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Run Gitleaks
+              uses: gitleaks/gitleaks-action@v2
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+            - name: Run Trivy Filesystem Scan
+              uses: aquasecurity/trivy-action@master
+              with:
+                  scan-type: "fs"
+                  scan-ref: "."
+                  format: "table"
+                  exit-code: "1"
+                  ignore-unfixed: true
+                  vuln-type: "os,library"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Check Dependency Vulnerabilities
+              run: |
+                  flutter pub outdated --json > outdated.json || true
+                  cat outdated.json
+
+            - name: Upload Dependency Report
+              uses: actions/upload-artifact@v4
+              with:
+                  name: dependency-report
+                  path: outdated.json
+
+    build-android:
+        name: Build Android
+        runs-on: ubuntu-latest
+        needs: security
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Flutter
+              uses: subosito/flutter-action@v2
+              with:
+                  flutter-version: ${{ env.FLUTTER_VERSION }}
+                  channel: "stable"
+                  cache: true
+
+            - name: Setup Java
+              uses: actions/setup-java@v4
+              with:
+                  distribution: "temurin"
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Install Dependencies
+              run: flutter pub get
+
+            - name: Build APK
+              run: flutter build apk --release
+
+            - name: Build App Bundle
+              run: flutter build appbundle --release
+
+            - name: Sign APK
+              uses: r0adkll/sign-android-release@v1
+              id: sign_apk
+              with:
+                  releaseDirectory: build/app/outputs/flutter-apk
+                  signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+                  alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+              env:
+                  BUILD_TOOLS_VERSION: "34.0.0"
+
+            - name: Sign AAB
+              uses: r0adkll/sign-android-release@v1
+              id: sign_aab
+              with:
+                  releaseDirectory: build/app/outputs/bundle/release
+                  signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+                  alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+              env:
+                  BUILD_TOOLS_VERSION: "34.0.0"
+
+            - name: Upload APK
+              uses: actions/upload-artifact@v4
+              with:
+                  name: flutter-apk
+                  path: ${{ steps.sign_apk.outputs.signedReleaseFile }}
+
+            - name: Upload AAB
+              uses: actions/upload-artifact@v4
+              with:
+                  name: flutter-aab
+                  path: ${{ steps.sign_aab.outputs.signedReleaseFile }}
+
+    build-ios:
+        name: Build iOS
+        runs-on: macos-14
+        needs: security
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Flutter
+              uses: subosito/flutter-action@v2
+              with:
+                  flutter-version: ${{ env.FLUTTER_VERSION }}
+                  channel: "stable"
+                  cache: true
+
+            - name: Install Dependencies
+              run: flutter pub get
+
+            - name: Install CocoaPods
+              run: cd ios && pod install
+
+            - name: Import Code Signing Certificate
+              uses: apple-actions/import-codesign-certs@v2
+              with:
+                  p12-file-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+                  p12-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+
+            - name: Download Provisioning Profile
+              uses: apple-actions/download-provisioning-profiles@v2
+              with:
+                  bundle-id: ${{ vars.IOS_BUNDLE_ID }}
+                  profile-type: "IOS_APP_STORE"
+                  issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+                  api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+                  api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+            - name: Build iOS Release
+              run: flutter build ios --release
+
+            - name: Build IPA
+              run: |
+                  cd ios
+                  xcodebuild archive \
+                      -workspace Runner.xcworkspace \
+                      -scheme Runner \
+                      -archivePath ../build/ios/Runner.xcarchive \
+                      -destination "generic/platform=iOS" \
+                      -allowProvisioningUpdates
+
+                  cat > ../ExportOptions.plist << EOF
+                  <?xml version="1.0" encoding="UTF-8"?>
+                  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                  <plist version="1.0">
+                  <dict>
+                      <key>method</key>
+                      <string>app-store</string>
+                      <key>teamID</key>
+                      <string>${{ secrets.APPLE_TEAM_ID }}</string>
+                  </dict>
+                  </plist>
+                  EOF
+
+                  xcodebuild -exportArchive \
+                      -archivePath ../build/ios/Runner.xcarchive \
+                      -exportPath ../build/ios/ipa \
+                      -exportOptionsPlist ../ExportOptions.plist
+
+            - name: Upload IPA
+              uses: actions/upload-artifact@v4
+              with:
+                  name: flutter-ipa
+                  path: build/ios/ipa/*.ipa
+
+    build-web:
+        name: Build Web
+        runs-on: ubuntu-latest
+        needs: security
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Flutter
+              uses: subosito/flutter-action@v2
+              with:
+                  flutter-version: ${{ env.FLUTTER_VERSION }}
+                  channel: "stable"
+                  cache: true
+
+            - name: Install Dependencies
+              run: flutter pub get
+
+            - name: Build Web
+              run: flutter build web --release
+
+            - name: Upload Web Build
+              uses: actions/upload-artifact@v4
+              with:
+                  name: flutter-web
+                  path: build/web/
+
+    deploy-firebase:
+        name: Deploy to Firebase App Distribution
+        runs-on: ubuntu-latest
+        needs: [build-android, build-ios]
+        if: github.ref == 'refs/heads/develop'
+        steps:
+            - name: Download APK
+              uses: actions/download-artifact@v4
+              with:
+                  name: flutter-apk
+                  path: ./release/android
+
+            - name: Deploy Android to Firebase
+              uses: wzieba/Firebase-Distribution-Github-Action@v1
+              with:
+                  appId: ${{ secrets.FIREBASE_APP_ID }}
+                  serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+                  groups: testers
+                  file: ./release/android/*.apk
+
+    deploy-stores:
+        name: Deploy to App Stores
+        runs-on: macos-14
+        needs: [build-android, build-ios]
+        if: github.ref == 'refs/heads/main'
+        steps:
+            - name: Download AAB
+              uses: actions/download-artifact@v4
+              with:
+                  name: flutter-aab
+                  path: ./release/android
+
+            - name: Download IPA
+              uses: actions/download-artifact@v4
+              with:
+                  name: flutter-ipa
+                  path: ./release/ios
+
+            - name: Deploy to Play Store
+              uses: r0adkll/upload-google-play@v1
+              with:
+                  serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT }}
+                  packageName: ${{ vars.ANDROID_PACKAGE_NAME }}
+                  releaseFiles: ./release/android/*.aab
+                  track: internal
+                  status: completed
+
+            - name: Deploy to TestFlight
+              uses: apple-actions/upload-testflight-build@v1
+              with:
+                  app-path: ./release/ios/*.ipa
+                  issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+                  api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+                  api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}

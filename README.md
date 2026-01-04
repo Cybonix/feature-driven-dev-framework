@@ -32,8 +32,20 @@ A comprehensive framework for **feature-driven development** with integrated **D
 │   ├── config.yml                # Central configuration (language, commands, security)
 │   ├── intake/                   # Prompt intake artifacts
 │   ├── pipelines/                # CI/CD templates
-│   │   ├── github/ci-template.yml
-│   │   └── gitlab/ci-template.yml
+│   │   ├── github/
+│   │   │   ├── ci-template.yml       # Generic CI
+│   │   │   ├── android-ci.yml        # Android builds
+│   │   │   ├── ios-ci.yml            # iOS builds
+│   │   │   ├── flutter-ci.yml        # Flutter cross-platform
+│   │   │   ├── react-native-ci.yml   # React Native + EAS
+│   │   │   └── frontend-ci.yml       # Enhanced frontend (Lighthouse, etc.)
+│   │   └── gitlab/
+│   │       ├── ci-template.yml
+│   │       ├── android-ci.yml
+│   │       ├── ios-ci.yml
+│   │       ├── flutter-ci.yml
+│   │       ├── react-native-ci.yml
+│   │       └── frontend-ci.yml
 │   ├── policies/                 # Security baselines (trivy, gitleaks mandated)
 │   │   └── security.md
 │   ├── observability/            # Logging/metrics/tracing standards
@@ -140,6 +152,107 @@ bash scripts/run-task.sh --list
 # Run a task (abstracted from underlying toolchain)
 bash scripts/run-task.sh test
 ```
+
+---
+
+## Mobile Platform Support
+
+This framework provides comprehensive support for mobile application development with native and cross-platform options.
+
+### Supported Platforms
+
+| Platform | Language | Build System | CI/CD Template |
+|----------|----------|--------------|----------------|
+| **Android** | Kotlin/Java | Gradle | `ops/pipelines/github/android-ci.yml` |
+| **iOS** | Swift | Xcode | `ops/pipelines/github/ios-ci.yml` |
+| **Flutter** | Dart | Flutter CLI | `ops/pipelines/github/flutter-ci.yml` |
+| **React Native** | TypeScript | Metro + EAS | `ops/pipelines/github/react-native-ci.yml` |
+
+### Mobile Configuration Example
+
+```yaml
+project:
+    name: "my-mobile-app"
+    language: "kotlin"           # kotlin | swift | dart
+    framework: "compose"         # compose | swiftui | flutter
+    type: "android"              # android | ios | flutter | react-native
+
+platform:
+    min_sdk: 24                  # Android API level or iOS version
+    target_sdk: 34
+    bundle_id: "com.company.app"
+    signing:
+        debug: true
+        release: false           # Enable when ready for store deployment
+
+commands:
+    setup: "./gradlew dependencies"
+    lint: "./gradlew lint"
+    test: "./gradlew test"
+    build_android: "./gradlew assembleDebug"
+    build_release: "./gradlew bundleRelease"
+```
+
+### Mobile Security Scanning
+
+All mobile pipelines include MobSF (Mobile Security Framework) scanning:
+- Static analysis of APK/IPA files
+- OWASP Mobile Top 10 compliance checks
+- Hardcoded secrets detection
+- Insecure permissions identification
+
+---
+
+## Enhanced Frontend Support
+
+The framework supports modern frontend frameworks with enhanced CI/CD capabilities.
+
+### Supported Frameworks
+
+| Framework | Rendering | CI Features |
+|-----------|-----------|-------------|
+| **React/Next.js** | CSR/SSR/SSG | Lighthouse, bundle analysis, visual regression |
+| **Vue/Nuxt** | CSR/SSR/SSG | Lighthouse, bundle analysis, visual regression |
+| **Angular** | CSR/SSR | Lighthouse, bundle analysis, accessibility |
+| **Svelte/SvelteKit** | CSR/SSR | Lighthouse, bundle analysis, visual regression |
+| **Remix** | SSR | Lighthouse, bundle analysis |
+
+### Frontend Configuration Example
+
+```yaml
+project:
+    name: "my-frontend-app"
+    language: "node"
+    framework: "next"            # next | nuxt | react | vue | angular | svelte | remix
+    type: "frontend"             # frontend | pwa
+
+commands:
+    setup: "npm ci"
+    lint: "npm run lint"
+    test: "npm test"
+    build: "npm run build"
+    e2e: "npx playwright test"
+    lighthouse: "npx lhci autorun"
+    bundle_analyze: "npm run analyze"
+    visual_test: "npx playwright test --project=visual"
+
+security:
+    dependency_audit:
+        tool: "npm"
+        args: "audit --audit-level=high"
+        fail_on: "high,critical"
+```
+
+### Frontend CI/CD Features
+
+The enhanced frontend pipeline (`ops/pipelines/github/frontend-ci.yml`) includes:
+
+- **Lighthouse CI**: Performance scoring with configurable thresholds
+- **Bundle Analysis**: Track bundle size changes across PRs
+- **Visual Regression**: Screenshot comparison with Playwright
+- **Browser Compatibility**: Test matrix across Chromium, Firefox, WebKit
+- **Accessibility Testing**: Automated axe-core checks
+- **PWA Validation**: Service worker and manifest verification
 
 ---
 

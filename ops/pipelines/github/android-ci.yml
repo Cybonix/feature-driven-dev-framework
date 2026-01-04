@@ -1,0 +1,287 @@
+# Android CI/CD Pipeline
+# Triggers on changes to Android-related files
+# Includes: lint, test, security scan, build, sign, and deploy
+
+name: android-ci
+
+on:
+    push:
+        branches: ["main", "develop"]
+        paths:
+            - "app/**"
+            - "android/**"
+            - "*.gradle*"
+            - "gradle/**"
+    pull_request:
+        branches: ["main", "develop"]
+        paths:
+            - "app/**"
+            - "android/**"
+            - "*.gradle*"
+            - "gradle/**"
+
+env:
+    JAVA_VERSION: "17"
+    JAVA_DISTRIBUTION: "temurin"
+
+jobs:
+    validate:
+        name: Lint & Format
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: ${{ env.JAVA_DISTRIBUTION }}
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v3
+
+            - name: Run Android Lint
+              run: ./gradlew lint
+
+            - name: Run Detekt (if configured)
+              run: ./gradlew detekt || echo "Detekt not configured, skipping"
+              continue-on-error: true
+
+            - name: Upload Lint Results
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: lint-results
+                  path: |
+                      **/build/reports/lint-results*.html
+                      **/build/reports/detekt/*.html
+
+    test:
+        name: Unit Tests
+        runs-on: ubuntu-latest
+        needs: validate
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: ${{ env.JAVA_DISTRIBUTION }}
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v3
+
+            - name: Run Unit Tests
+              run: ./gradlew test
+
+            - name: Upload Test Results
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: test-results
+                  path: "**/build/reports/tests/"
+
+            - name: Upload Coverage Report
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: coverage-report
+                  path: "**/build/reports/jacoco/"
+
+    instrumented-tests:
+        name: Instrumented Tests
+        runs-on: ubuntu-latest
+        needs: test
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: ${{ env.JAVA_DISTRIBUTION }}
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v3
+
+            - name: Enable KVM
+              run: |
+                  echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+                  sudo udevadm control --reload-rules
+                  sudo udevadm trigger --name-match=kvm
+
+            - name: Run Instrumented Tests
+              uses: reactivecircus/android-emulator-runner@v2
+              with:
+                  api-level: 30
+                  arch: x86_64
+                  profile: Nexus 6
+                  script: ./gradlew connectedAndroidTest
+
+            - name: Upload Instrumented Test Results
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: instrumented-test-results
+                  path: "**/build/reports/androidTests/"
+
+    security:
+        name: Security Scan
+        runs-on: ubuntu-latest
+        needs: test
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Run Gitleaks
+              uses: gitleaks/gitleaks-action@v2
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+            - name: Run Trivy Filesystem Scan
+              uses: aquasecurity/trivy-action@master
+              with:
+                  scan-type: "fs"
+                  scan-ref: "."
+                  format: "table"
+                  exit-code: "1"
+                  ignore-unfixed: true
+                  vuln-type: "os,library"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: ${{ env.JAVA_DISTRIBUTION }}
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Build Debug APK for MobSF
+              run: ./gradlew assembleDebug
+
+            - name: Run MobSF Static Analysis
+              run: |
+                  docker run --rm -v $(pwd):/src opensecurity/mobile-security-framework-mobsf:latest \
+                      python3 /home/mobsf/Mobile-Security-Framework-MobSF/manage.py analyze \
+                      --scan-type apk \
+                      --file /src/app/build/outputs/apk/debug/app-debug.apk \
+                      --json > mobsf-report.json || true
+
+            - name: Upload MobSF Report
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: mobsf-report
+                  path: mobsf-report.json
+
+    build:
+        name: Build Release
+        runs-on: ubuntu-latest
+        needs: security
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up JDK
+              uses: actions/setup-java@v4
+              with:
+                  distribution: ${{ env.JAVA_DISTRIBUTION }}
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v3
+
+            - name: Build Release APK
+              run: ./gradlew assembleRelease
+
+            - name: Build Release Bundle (AAB)
+              run: ./gradlew bundleRelease
+
+            - name: Sign APK
+              uses: r0adkll/sign-android-release@v1
+              id: sign_apk
+              with:
+                  releaseDirectory: app/build/outputs/apk/release
+                  signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+                  alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+              env:
+                  BUILD_TOOLS_VERSION: "34.0.0"
+
+            - name: Sign AAB
+              uses: r0adkll/sign-android-release@v1
+              id: sign_aab
+              with:
+                  releaseDirectory: app/build/outputs/bundle/release
+                  signingKeyBase64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+                  alias: ${{ secrets.ANDROID_KEY_ALIAS }}
+                  keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+                  keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+              env:
+                  BUILD_TOOLS_VERSION: "34.0.0"
+
+            - name: Upload Signed APK
+              uses: actions/upload-artifact@v4
+              with:
+                  name: signed-apk
+                  path: ${{ steps.sign_apk.outputs.signedReleaseFile }}
+
+            - name: Upload Signed AAB
+              uses: actions/upload-artifact@v4
+              with:
+                  name: signed-aab
+                  path: ${{ steps.sign_aab.outputs.signedReleaseFile }}
+
+    deploy-firebase:
+        name: Deploy to Firebase App Distribution
+        runs-on: ubuntu-latest
+        needs: build
+        if: github.ref == 'refs/heads/develop'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Download Signed APK
+              uses: actions/download-artifact@v4
+              with:
+                  name: signed-apk
+                  path: ./release
+
+            - name: Deploy to Firebase App Distribution
+              uses: wzieba/Firebase-Distribution-Github-Action@v1
+              with:
+                  appId: ${{ secrets.FIREBASE_APP_ID }}
+                  serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+                  groups: testers
+                  file: ./release/app-release-signed.apk
+
+    deploy-play-store:
+        name: Deploy to Play Store
+        runs-on: ubuntu-latest
+        needs: build
+        if: github.ref == 'refs/heads/main'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Download Signed AAB
+              uses: actions/download-artifact@v4
+              with:
+                  name: signed-aab
+                  path: ./release
+
+            - name: Deploy to Play Store (Internal Track)
+              uses: r0adkll/upload-google-play@v1
+              with:
+                  serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT }}
+                  packageName: ${{ vars.ANDROID_PACKAGE_NAME }}
+                  releaseFiles: ./release/*.aab
+                  track: internal
+                  status: completed

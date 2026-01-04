@@ -1,0 +1,272 @@
+# iOS CI/CD Pipeline
+# Triggers on changes to iOS-related files
+# Includes: lint, test, security scan, build, sign, and deploy to TestFlight
+
+name: ios-ci
+
+on:
+    push:
+        branches: ["main", "develop"]
+        paths:
+            - "ios/**"
+            - "*.xcodeproj/**"
+            - "*.xcworkspace/**"
+            - "Podfile*"
+            - "Package.swift"
+            - "*.swift"
+    pull_request:
+        branches: ["main", "develop"]
+        paths:
+            - "ios/**"
+            - "*.xcodeproj/**"
+            - "*.xcworkspace/**"
+            - "Podfile*"
+            - "Package.swift"
+            - "*.swift"
+
+env:
+    XCODE_VERSION: "15.2"
+    IOS_SIMULATOR: "iPhone 15"
+    IOS_VERSION: "17.2"
+
+jobs:
+    validate:
+        name: Lint & Format
+        runs-on: macos-14
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Select Xcode Version
+              run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+
+            - name: Install SwiftLint
+              run: brew install swiftlint
+
+            - name: Run SwiftLint
+              run: swiftlint lint --strict --reporter github-actions-logging
+
+            - name: Check Swift Format
+              run: |
+                  brew install swift-format
+                  swift-format lint --recursive . || echo "Format issues found"
+
+    test:
+        name: Unit & UI Tests
+        runs-on: macos-14
+        needs: validate
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Select Xcode Version
+              run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+
+            - name: Install CocoaPods Dependencies
+              run: |
+                  if [ -f "Podfile" ]; then
+                      pod install
+                  fi
+
+            - name: Resolve Swift Package Dependencies
+              run: |
+                  if [ -f "Package.swift" ]; then
+                      swift package resolve
+                  fi
+
+            - name: Run Unit Tests
+              run: |
+                  xcodebuild test \
+                      -workspace *.xcworkspace \
+                      -scheme App \
+                      -destination "platform=iOS Simulator,name=${{ env.IOS_SIMULATOR }},OS=${{ env.IOS_VERSION }}" \
+                      -resultBundlePath TestResults.xcresult \
+                      -enableCodeCoverage YES \
+                      CODE_SIGNING_ALLOWED=NO || \
+                  xcodebuild test \
+                      -project *.xcodeproj \
+                      -scheme App \
+                      -destination "platform=iOS Simulator,name=${{ env.IOS_SIMULATOR }},OS=${{ env.IOS_VERSION }}" \
+                      -resultBundlePath TestResults.xcresult \
+                      -enableCodeCoverage YES \
+                      CODE_SIGNING_ALLOWED=NO
+
+            - name: Upload Test Results
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: test-results
+                  path: TestResults.xcresult
+
+            - name: Generate Coverage Report
+              run: |
+                  xcrun xccov view --report TestResults.xcresult > coverage.txt || true
+
+            - name: Upload Coverage Report
+              uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: coverage-report
+                  path: coverage.txt
+
+    security:
+        name: Security Scan
+        runs-on: macos-14
+        needs: test
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Run Gitleaks
+              uses: gitleaks/gitleaks-action@v2
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+            - name: Run Trivy Filesystem Scan
+              uses: aquasecurity/trivy-action@master
+              with:
+                  scan-type: "fs"
+                  scan-ref: "."
+                  format: "table"
+                  exit-code: "1"
+                  ignore-unfixed: true
+                  vuln-type: "os,library"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Check for Hardcoded Secrets in Code
+              run: |
+                  # Search for common secret patterns in Swift files
+                  if grep -rE "(api[_-]?key|secret|password|token)\s*[:=]\s*[\"'][^\"']+[\"']" --include="*.swift" .; then
+                      echo "Warning: Potential hardcoded secrets found"
+                  fi
+
+    build:
+        name: Build Release
+        runs-on: macos-14
+        needs: security
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Select Xcode Version
+              run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+
+            - name: Install CocoaPods Dependencies
+              run: |
+                  if [ -f "Podfile" ]; then
+                      pod install
+                  fi
+
+            - name: Import Code Signing Certificate
+              uses: apple-actions/import-codesign-certs@v2
+              with:
+                  p12-file-base64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+                  p12-password: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+
+            - name: Download Provisioning Profile
+              uses: apple-actions/download-provisioning-profiles@v2
+              with:
+                  bundle-id: ${{ vars.IOS_BUNDLE_ID }}
+                  profile-type: "IOS_APP_STORE"
+                  issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+                  api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+                  api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+
+            - name: Build Archive
+              run: |
+                  xcodebuild archive \
+                      -workspace *.xcworkspace \
+                      -scheme App \
+                      -archivePath build/App.xcarchive \
+                      -destination "generic/platform=iOS" \
+                      -allowProvisioningUpdates || \
+                  xcodebuild archive \
+                      -project *.xcodeproj \
+                      -scheme App \
+                      -archivePath build/App.xcarchive \
+                      -destination "generic/platform=iOS" \
+                      -allowProvisioningUpdates
+
+            - name: Create ExportOptions.plist
+              run: |
+                  cat > ExportOptions.plist << EOF
+                  <?xml version="1.0" encoding="UTF-8"?>
+                  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                  <plist version="1.0">
+                  <dict>
+                      <key>method</key>
+                      <string>app-store</string>
+                      <key>teamID</key>
+                      <string>${{ secrets.APPLE_TEAM_ID }}</string>
+                      <key>uploadSymbols</key>
+                      <true/>
+                      <key>compileBitcode</key>
+                      <false/>
+                  </dict>
+                  </plist>
+                  EOF
+
+            - name: Export IPA
+              run: |
+                  xcodebuild -exportArchive \
+                      -archivePath build/App.xcarchive \
+                      -exportPath build/ipa \
+                      -exportOptionsPlist ExportOptions.plist
+
+            - name: Upload Archive
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ios-archive
+                  path: build/App.xcarchive
+
+            - name: Upload IPA
+              uses: actions/upload-artifact@v4
+              with:
+                  name: ios-ipa
+                  path: build/ipa/*.ipa
+
+    deploy-firebase:
+        name: Deploy to Firebase App Distribution
+        runs-on: macos-14
+        needs: build
+        if: github.ref == 'refs/heads/develop'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Download IPA
+              uses: actions/download-artifact@v4
+              with:
+                  name: ios-ipa
+                  path: ./release
+
+            - name: Deploy to Firebase App Distribution
+              uses: wzieba/Firebase-Distribution-Github-Action@v1
+              with:
+                  appId: ${{ secrets.FIREBASE_IOS_APP_ID }}
+                  serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+                  groups: testers
+                  file: ./release/*.ipa
+
+    deploy-testflight:
+        name: Deploy to TestFlight
+        runs-on: macos-14
+        needs: build
+        if: github.ref == 'refs/heads/main'
+        steps:
+            - name: Download IPA
+              uses: actions/download-artifact@v4
+              with:
+                  name: ios-ipa
+                  path: ./release
+
+            - name: Upload to TestFlight
+              uses: apple-actions/upload-testflight-build@v1
+              with:
+                  app-path: ./release/*.ipa
+                  issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
+                  api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
+                  api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}

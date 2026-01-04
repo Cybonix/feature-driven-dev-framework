@@ -1,0 +1,208 @@
+# Android CI/CD Pipeline for GitLab
+# Includes: lint, test, security scan, build, sign, and deploy
+
+stages:
+    - validate
+    - test
+    - security
+    - build
+    - deploy
+
+variables:
+    JAVA_VERSION: "17"
+    ANDROID_SDK_VERSION: "34"
+    GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true"
+
+# Cache Gradle dependencies
+.gradle_cache: &gradle_cache
+    cache:
+        key: gradle-${CI_COMMIT_REF_SLUG}
+        paths:
+            - .gradle/
+            - build/
+            - "*/build/"
+        policy: pull-push
+
+# Base Android job
+.android_base:
+    image: cimg/android:2024.01
+    <<: *gradle_cache
+    before_script:
+        - export GRADLE_USER_HOME=$(pwd)/.gradle
+        - chmod +x ./gradlew
+
+# ============================================================================
+# VALIDATE STAGE
+# ============================================================================
+lint:
+    stage: validate
+    extends: .android_base
+    script:
+        - ./gradlew lint
+        - ./gradlew detekt || echo "Detekt not configured"
+    artifacts:
+        when: always
+        paths:
+            - "**/build/reports/lint-results*.html"
+            - "**/build/reports/detekt/"
+        expire_in: 1 week
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+unit_tests:
+    stage: test
+    extends: .android_base
+    script:
+        - ./gradlew test
+    artifacts:
+        when: always
+        paths:
+            - "**/build/reports/tests/"
+            - "**/build/reports/jacoco/"
+        reports:
+            junit: "**/build/test-results/*/TEST-*.xml"
+        expire_in: 1 week
+    coverage: '/Total.*?([0-9]{1,3})%/'
+
+instrumented_tests:
+    stage: test
+    extends: .android_base
+    script:
+        - echo "Instrumented tests require device farm or emulator"
+        - echo "Consider using Firebase Test Lab or AWS Device Farm"
+        # Example with Firebase Test Lab:
+        # - gcloud firebase test android run --type instrumentation --app app/build/outputs/apk/debug/app-debug.apk --test app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    allow_failure: true
+
+# ============================================================================
+# SECURITY STAGE
+# ============================================================================
+gitleaks:
+    stage: security
+    image:
+        name: zricethezav/gitleaks:latest
+        entrypoint: [""]
+    script:
+        - gitleaks detect --source . --verbose --no-git
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+trivy_scan:
+    stage: security
+    image:
+        name: aquasec/trivy:latest
+        entrypoint: [""]
+    script:
+        - trivy fs . --exit-code 1 --severity HIGH,CRITICAL --no-progress
+    artifacts:
+        when: always
+        paths:
+            - trivy-report.json
+        expire_in: 1 week
+    allow_failure: false
+
+mobsf_scan:
+    stage: security
+    extends: .android_base
+    script:
+        - ./gradlew assembleDebug
+        - |
+            docker run --rm -v $(pwd):/src opensecurity/mobile-security-framework-mobsf:latest \
+                python3 /home/mobsf/Mobile-Security-Framework-MobSF/manage.py analyze \
+                --scan-type apk \
+                --file /src/app/build/outputs/apk/debug/app-debug.apk \
+                --json > mobsf-report.json || true
+    artifacts:
+        when: always
+        paths:
+            - mobsf-report.json
+        expire_in: 1 week
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+    allow_failure: true
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+build_debug:
+    stage: build
+    extends: .android_base
+    script:
+        - ./gradlew assembleDebug
+    artifacts:
+        paths:
+            - app/build/outputs/apk/debug/
+        expire_in: 1 week
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build_release:
+    stage: build
+    extends: .android_base
+    script:
+        - echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore.jks
+        - ./gradlew assembleRelease bundleRelease
+            -Pandroid.injected.signing.store.file=$(pwd)/keystore.jks
+            -Pandroid.injected.signing.store.password=$ANDROID_KEYSTORE_PASSWORD
+            -Pandroid.injected.signing.key.alias=$ANDROID_KEY_ALIAS
+            -Pandroid.injected.signing.key.password=$ANDROID_KEY_PASSWORD
+        - rm keystore.jks
+    artifacts:
+        paths:
+            - app/build/outputs/apk/release/
+            - app/build/outputs/bundle/release/
+        expire_in: 4 weeks
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+# ============================================================================
+# DEPLOY STAGE
+# ============================================================================
+deploy_firebase:
+    stage: deploy
+    image: node:20
+    before_script:
+        - npm install -g firebase-tools
+    script:
+        - |
+            firebase appdistribution:distribute \
+                app/build/outputs/apk/release/app-release.apk \
+                --app $FIREBASE_APP_ID \
+                --groups "testers" \
+                --token "$FIREBASE_TOKEN"
+    dependencies:
+        - build_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "develop"'
+    environment:
+        name: firebase-distribution
+
+deploy_play_store:
+    stage: deploy
+    image: ruby:3.2
+    before_script:
+        - gem install fastlane
+        - echo "$PLAY_STORE_SERVICE_ACCOUNT" > play-store-key.json
+    script:
+        - |
+            fastlane supply \
+                --aab app/build/outputs/bundle/release/app-release.aab \
+                --track internal \
+                --json_key play-store-key.json \
+                --package_name $ANDROID_PACKAGE_NAME
+        - rm play-store-key.json
+    dependencies:
+        - build_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    environment:
+        name: play-store-internal

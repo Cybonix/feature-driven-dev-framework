@@ -39,7 +39,12 @@
 ## Path Conventions
 - **Single project**: `src/`, `tests/` at repository root
 - **Web app**: `backend/src/`, `frontend/src/`
-- **Mobile**: `api/src/`, `ios/src/` or `android/src/`
+- **Mobile + API**: `api/src/`, `ios/` or `android/`
+- **Android Native**: `app/src/main/kotlin/`, `app/src/test/`, `app/src/androidTest/`
+- **iOS Native**: `App/Sources/`, `Tests/`, `UITests/`
+- **Flutter**: `lib/src/`, `test/`, `integration_test/`
+- **React Native**: `src/`, `__tests__/`, `e2e/`
+- **Frontend (Next/Nuxt)**: `src/` or `app/`, `pages/`, `components/`
 - Paths shown below assume single project - adjust based on plan.md structure
 
 ## Phase 3.1: Setup
@@ -75,6 +80,59 @@
 - [ ] T021 [P] Update docs/api.md
 - [ ] T022 Remove duplication
 - [ ] T023 Run manual-testing.md
+
+---
+
+## Mobile-Specific Tasks *(include for android/ios/flutter/react-native)*
+
+### Phase 3.1M: Mobile Setup
+- [ ] T0XXm Configure build.gradle.kts / Podfile / pubspec.yaml
+- [ ] T0XXm Set up app signing (debug keystore / development provisioning)
+- [ ] T0XXm Configure CI/CD pipeline (copy from ops/pipelines/)
+- [ ] T0XXm Set up navigation framework
+- [ ] T0XXm Configure dependency injection
+
+### Phase 3.2M: Mobile Tests First
+- [ ] T0XXm [P] UI test for main screen
+- [ ] T0XXm [P] Integration test for API client
+- [ ] T0XXm [P] ViewModel/BLoC test for core logic
+- [ ] T0XXm [P] Snapshot test for critical components
+
+### Phase 3.5M: Mobile Polish
+- [ ] T0XXm Configure ProGuard/R8 rules (Android) or bitcode (iOS)
+- [ ] T0XXm App icon and splash screen for all sizes
+- [ ] T0XXm Deep linking / universal links configuration
+- [ ] T0XXm Push notification setup
+- [ ] T0XXm Analytics integration
+- [ ] T0XXm Crash reporting integration
+- [ ] T0XXm Store listing metadata (screenshots, descriptions)
+- [ ] T0XXm Privacy policy and data safety form
+
+---
+
+## Frontend-Specific Tasks *(include for frontend/pwa)*
+
+### Phase 3.1F: Frontend Setup
+- [ ] T0XXf Configure bundler (Vite/webpack/Turbopack)
+- [ ] T0XXf Set up CSS framework (Tailwind/styled-components)
+- [ ] T0XXf Configure TypeScript strict mode
+- [ ] T0XXf Set up Playwright for E2E testing
+- [ ] T0XXf Configure PWA manifest and service worker (if PWA)
+
+### Phase 3.2F: Frontend Tests First
+- [ ] T0XXf [P] Component test for [ComponentName]
+- [ ] T0XXf [P] E2E test for user journey in e2e/
+- [ ] T0XXf [P] Visual regression baseline capture
+- [ ] T0XXf [P] Accessibility test for main pages
+
+### Phase 3.5F: Frontend Polish
+- [ ] T0XXf Lighthouse audit and optimization (target: 90+)
+- [ ] T0XXf Bundle size optimization (code splitting, tree shaking)
+- [ ] T0XXf PWA icons and manifest validation
+- [ ] T0XXf SEO meta tags and sitemap
+- [ ] T0XXf Browser compatibility testing (Chrome, Firefox, Safari)
+- [ ] T0XXf Performance monitoring setup (Web Vitals)
+- [ ] T0XXf Error boundary implementation
 
 ## Dependencies
 - Tests (T004-T007) before implementation (T008-T014)

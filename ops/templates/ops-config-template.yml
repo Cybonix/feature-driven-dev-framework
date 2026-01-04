@@ -3,9 +3,22 @@
 
 project:
     name: "[PROJECT_NAME]"
-    language: "generic"   # python | node | go | rust | java | generic
-    framework: "none"     # django | fastapi | react | express | none
-    type: "library"       # service | library | cli | frontend
+    language: "generic"   # python | node | go | rust | java | kotlin | swift | dart | generic
+    framework: "none"     # django | fastapi | react | vue | angular | svelte | next | nuxt | remix | express | compose | swiftui | none
+    type: "library"       # service | library | cli | frontend | pwa | android | ios | react-native | flutter
+
+    # Platform-specific configuration (required when type is android|ios|react-native|flutter)
+    # Uncomment and configure for mobile projects:
+    # platform:
+    #     target_sdk: "34"              # Android: target API level
+    #     min_sdk: "24"                 # Android: minimum API level
+    #     deployment_target: "15.0"     # iOS: minimum iOS version
+    #     flutter_version: "3.16"       # Flutter: SDK version
+    #     bundle_id: "com.example.app"  # iOS/Android: app identifier
+    #     signing:
+    #         keystore_env: "ANDROID_KEYSTORE_BASE64"
+    #         certificate_env: "IOS_CERTIFICATE_BASE64"
+    #         provisioning_env: "IOS_PROVISIONING_PROFILE_BASE64"
 
 # Environments determine deployment strategies
 environments:
@@ -22,11 +35,25 @@ environments:
 # Central Command Registry: Agents read this to know how to operate the repo
 # Update these commands to match your project's toolchain
 commands:
+    # Core commands (all project types)
     setup: "echo 'No setup defined'"
     lint: "echo 'No lint defined'"
     test: "echo 'No test defined'"
     build: "echo 'No build defined'"
     start: "echo 'No start defined'"
+
+    # Mobile-specific commands (used when type is android|ios|react-native|flutter)
+    build_android: "echo 'No Android build defined'"
+    build_ios: "echo 'No iOS build defined'"
+    deploy_testflight: "echo 'No TestFlight deploy defined'"
+    deploy_play_store: "echo 'No Play Store deploy defined'"
+    deploy_firebase: "echo 'No Firebase App Distribution deploy defined'"
+
+    # Frontend-specific commands (used when type is frontend|pwa)
+    lighthouse: "echo 'No lighthouse audit defined'"
+    bundle_analyze: "echo 'No bundle analysis defined'"
+    visual_test: "echo 'No visual testing defined'"
+    e2e: "echo 'No e2e testing defined'"
 
 # Security Configuration: Defines the gates for CI
 security:
@@ -46,6 +73,19 @@ security:
         require_signed_commits: false
         require_code_review: true
 
+    # Mobile-specific security (used when type is android|ios|react-native|flutter)
+    mobile:
+        tool: "mobsf"
+        args: "--scan"
+        fail_on: "high,critical"
+        platforms: ["android", "ios"]
+
+    # Frontend-specific security (used when type is frontend|pwa)
+    frontend:
+        npm_audit: true
+        lighthouse_threshold: 80
+        bundle_size_limit: "500kb"
+
 # CI/CD Metadata
 ci_cd:
     providers:
@@ -54,6 +94,171 @@ ci_cd:
     stages:
         - "validate"  # lint, format
         - "test"      # unit, integration
-        - "security"  # sast, sca, secrets
-        - "build"     # compile, docker build
+        - "security"  # sast, sca, secrets, mobile
+        - "build"     # compile, docker build, app signing
+        - "deploy"    # app distribution, store upload
         - "release"   # semantic release
+
+# ============================================================================
+# PLATFORM-SPECIFIC CONFIGURATION EXAMPLES
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# ANDROID PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-android-app"
+#     language: "kotlin"
+#     framework: "compose"
+#     type: "android"
+#     platform:
+#         target_sdk: "34"
+#         min_sdk: "24"
+#         bundle_id: "com.example.myapp"
+#         signing:
+#             keystore_env: "ANDROID_KEYSTORE_BASE64"
+#
+# commands:
+#     setup: "./gradlew dependencies"
+#     lint: "./gradlew lint detekt"
+#     test: "./gradlew test"
+#     build: "./gradlew assembleDebug"
+#     start: "./gradlew installDebug && adb shell am start -n com.example.myapp/.MainActivity"
+#     build_android: "./gradlew assembleRelease bundleRelease"
+#     deploy_play_store: "fastlane android deploy"
+#     deploy_firebase: "fastlane android firebase"
+
+# ----------------------------------------------------------------------------
+# iOS PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-ios-app"
+#     language: "swift"
+#     framework: "swiftui"
+#     type: "ios"
+#     platform:
+#         deployment_target: "15.0"
+#         bundle_id: "com.example.myapp"
+#         signing:
+#             certificate_env: "IOS_CERTIFICATE_BASE64"
+#             provisioning_env: "IOS_PROVISIONING_PROFILE_BASE64"
+#
+# commands:
+#     setup: "cd ios && pod install || swift package resolve"
+#     lint: "swiftlint lint --strict"
+#     test: "xcodebuild test -scheme MyApp -destination 'platform=iOS Simulator,name=iPhone 15'"
+#     build: "xcodebuild build -scheme MyApp -configuration Debug"
+#     start: "open -a Simulator && xcrun simctl boot 'iPhone 15'"
+#     build_ios: "xcodebuild archive -scheme MyApp -archivePath build/MyApp.xcarchive"
+#     deploy_testflight: "fastlane ios beta"
+
+# ----------------------------------------------------------------------------
+# FLUTTER PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-flutter-app"
+#     language: "dart"
+#     framework: "none"
+#     type: "flutter"
+#     platform:
+#         flutter_version: "3.16"
+#         target_sdk: "34"
+#         min_sdk: "24"
+#         deployment_target: "15.0"
+#         bundle_id: "com.example.myapp"
+#
+# commands:
+#     setup: "flutter pub get"
+#     lint: "flutter analyze && dart format --set-exit-if-changed ."
+#     test: "flutter test --coverage"
+#     build: "flutter build apk --debug && flutter build ios --debug --no-codesign"
+#     start: "flutter run"
+#     build_android: "flutter build apk --release && flutter build appbundle --release"
+#     build_ios: "flutter build ios --release"
+#     deploy_play_store: "fastlane android deploy"
+#     deploy_testflight: "fastlane ios beta"
+
+# ----------------------------------------------------------------------------
+# REACT NATIVE PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-rn-app"
+#     language: "typescript"
+#     framework: "none"
+#     type: "react-native"
+#     platform:
+#         target_sdk: "34"
+#         min_sdk: "24"
+#         deployment_target: "15.0"
+#         bundle_id: "com.example.myapp"
+#
+# commands:
+#     setup: "npm ci && cd ios && pod install"
+#     lint: "npm run lint && npx tsc --noEmit"
+#     test: "npm test -- --coverage"
+#     build: "npm run build"
+#     start: "npm start"
+#     build_android: "cd android && ./gradlew assembleRelease"
+#     build_ios: "cd ios && xcodebuild archive -scheme MyApp -archivePath ../build/MyApp.xcarchive"
+#     deploy_play_store: "eas submit --platform android"
+#     deploy_testflight: "eas submit --platform ios"
+#     deploy_firebase: "eas build --platform all && firebase appdistribution:distribute"
+
+# ----------------------------------------------------------------------------
+# FRONTEND (NEXT.JS) PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-nextjs-app"
+#     language: "typescript"
+#     framework: "next"
+#     type: "frontend"
+#
+# commands:
+#     setup: "npm ci"
+#     lint: "npm run lint && npx tsc --noEmit"
+#     test: "npm test -- --coverage"
+#     build: "npm run build"
+#     start: "npm run dev"
+#     lighthouse: "npx lighthouse http://localhost:3000 --output json --output-path ./lighthouse-report.json"
+#     bundle_analyze: "ANALYZE=true npm run build"
+#     visual_test: "npx playwright test --project=visual"
+#     e2e: "npx playwright test"
+
+# ----------------------------------------------------------------------------
+# FRONTEND (VUE/NUXT) PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-nuxt-app"
+#     language: "typescript"
+#     framework: "nuxt"
+#     type: "frontend"
+#
+# commands:
+#     setup: "npm ci"
+#     lint: "npm run lint"
+#     test: "npm run test"
+#     build: "npm run build"
+#     start: "npm run dev"
+#     lighthouse: "npx lighthouse http://localhost:3000 --output json"
+#     bundle_analyze: "nuxt analyze"
+#     e2e: "npx cypress run"
+
+# ----------------------------------------------------------------------------
+# PWA PROJECT EXAMPLE
+# ----------------------------------------------------------------------------
+# project:
+#     name: "my-pwa"
+#     language: "typescript"
+#     framework: "react"
+#     type: "pwa"
+#
+# commands:
+#     setup: "npm ci"
+#     lint: "npm run lint"
+#     test: "npm test"
+#     build: "npm run build"
+#     start: "npm start"
+#     lighthouse: "npx lighthouse http://localhost:3000 --output json --preset=desktop"
+#     bundle_analyze: "npm run build -- --stats && npx webpack-bundle-analyzer dist/stats.json"
+#     visual_test: "npx playwright test --project=visual"
+#     e2e: "npx playwright test"

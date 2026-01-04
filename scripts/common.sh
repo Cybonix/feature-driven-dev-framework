@@ -162,3 +162,223 @@ check_dir() {
         return 1
     fi
 }
+
+# ============================================================================
+# PLATFORM DETECTION FUNCTIONS
+# ============================================================================
+
+# Get the platform category from project type
+# Returns: mobile | frontend | backend | generic
+get_platform_type() {
+    local repo_root="${1:-$(get_repo_root)}"
+    local project_type=$(get_ops_config "project.type" "$repo_root")
+
+    case "$project_type" in
+        android|ios|react-native|flutter)
+            echo "mobile"
+            ;;
+        frontend|pwa)
+            echo "frontend"
+            ;;
+        service|library|cli)
+            echo "backend"
+            ;;
+        *)
+            echo "generic"
+            ;;
+    esac
+}
+
+# Check if project is a mobile project
+is_mobile_project() {
+    local platform=$(get_platform_type "$1")
+    [[ "$platform" == "mobile" ]]
+}
+
+# Check if project is a frontend project
+is_frontend_project() {
+    local platform=$(get_platform_type "$1")
+    [[ "$platform" == "frontend" ]]
+}
+
+# Get mobile-specific configuration
+# Usage: get_mobile_config "target_sdk" -> returns "34"
+get_mobile_config() {
+    local key="$1"
+    local repo_root="${2:-$(get_repo_root)}"
+    get_ops_config "project.platform.$key" "$repo_root"
+}
+
+# Get the appropriate CI template filename based on project type
+get_ci_template() {
+    local repo_root="${1:-$(get_repo_root)}"
+    local project_type=$(get_ops_config "project.type" "$repo_root")
+
+    case "$project_type" in
+        android)
+            echo "android-ci.yml"
+            ;;
+        ios)
+            echo "ios-ci.yml"
+            ;;
+        flutter)
+            echo "flutter-ci.yml"
+            ;;
+        react-native)
+            echo "react-native-ci.yml"
+            ;;
+        frontend|pwa)
+            echo "frontend-ci.yml"
+            ;;
+        *)
+            echo "ci-template.yml"
+            ;;
+    esac
+}
+
+# Get platform-specific default commands
+# Usage: get_platform_default_command "build" -> returns appropriate build command
+get_platform_default_command() {
+    local task_name="$1"
+    local repo_root="${2:-$(get_repo_root)}"
+    local project_type=$(get_ops_config "project.type" "$repo_root")
+    local language=$(get_ops_config "project.language" "$repo_root")
+
+    case "$project_type" in
+        android)
+            case "$task_name" in
+                setup) echo "./gradlew dependencies" ;;
+                lint) echo "./gradlew lint" ;;
+                test) echo "./gradlew test" ;;
+                build) echo "./gradlew assembleDebug" ;;
+                build_android) echo "./gradlew assembleRelease bundleRelease" ;;
+                start) echo "./gradlew installDebug" ;;
+                *) echo "" ;;
+            esac
+            ;;
+        ios)
+            case "$task_name" in
+                setup) echo "pod install || swift package resolve" ;;
+                lint) echo "swiftlint lint --strict" ;;
+                test) echo "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=iPhone 15'" ;;
+                build) echo "xcodebuild build -scheme App -configuration Debug" ;;
+                build_ios) echo "xcodebuild archive -scheme App -archivePath build/App.xcarchive" ;;
+                start) echo "open -a Simulator" ;;
+                *) echo "" ;;
+            esac
+            ;;
+        flutter)
+            case "$task_name" in
+                setup) echo "flutter pub get" ;;
+                lint) echo "flutter analyze" ;;
+                test) echo "flutter test --coverage" ;;
+                build) echo "flutter build apk --debug" ;;
+                build_android) echo "flutter build apk --release && flutter build appbundle --release" ;;
+                build_ios) echo "flutter build ios --release" ;;
+                start) echo "flutter run" ;;
+                *) echo "" ;;
+            esac
+            ;;
+        react-native)
+            case "$task_name" in
+                setup) echo "npm ci && cd ios && pod install" ;;
+                lint) echo "npm run lint" ;;
+                test) echo "npm test -- --coverage" ;;
+                build) echo "npm run build" ;;
+                build_android) echo "cd android && ./gradlew assembleRelease" ;;
+                build_ios) echo "cd ios && xcodebuild archive -scheme App -archivePath ../build/App.xcarchive" ;;
+                start) echo "npm start" ;;
+                *) echo "" ;;
+            esac
+            ;;
+        frontend|pwa)
+            case "$task_name" in
+                setup) echo "npm ci" ;;
+                lint) echo "npm run lint" ;;
+                test) echo "npm test -- --coverage" ;;
+                build) echo "npm run build" ;;
+                start) echo "npm run dev" ;;
+                lighthouse) echo "npx lighthouse http://localhost:3000 --output json" ;;
+                bundle_analyze) echo "npm run build -- --analyze" ;;
+                visual_test) echo "npx playwright test --project=visual" ;;
+                e2e) echo "npx playwright test" ;;
+                *) echo "" ;;
+            esac
+            ;;
+        *)
+            # Generic/backend defaults based on language
+            case "$language" in
+                python)
+                    case "$task_name" in
+                        setup) echo "pip install -e '.[dev]'" ;;
+                        lint) echo "ruff check ." ;;
+                        test) echo "pytest" ;;
+                        build) echo "python -m build" ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+                node|typescript)
+                    case "$task_name" in
+                        setup) echo "npm ci" ;;
+                        lint) echo "npm run lint" ;;
+                        test) echo "npm test" ;;
+                        build) echo "npm run build" ;;
+                        start) echo "npm start" ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+                go)
+                    case "$task_name" in
+                        setup) echo "go mod download" ;;
+                        lint) echo "golangci-lint run" ;;
+                        test) echo "go test ./..." ;;
+                        build) echo "go build ./..." ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+                rust)
+                    case "$task_name" in
+                        setup) echo "cargo fetch" ;;
+                        lint) echo "cargo clippy" ;;
+                        test) echo "cargo test" ;;
+                        build) echo "cargo build --release" ;;
+                        *) echo "" ;;
+                    esac
+                    ;;
+                *)
+                    echo ""
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# Print platform information
+print_platform_info() {
+    local repo_root="${1:-$(get_repo_root)}"
+    local project_type=$(get_ops_config "project.type" "$repo_root")
+    local platform=$(get_platform_type "$repo_root")
+    local language=$(get_ops_config "project.language" "$repo_root")
+    local framework=$(get_ops_config "project.framework" "$repo_root")
+
+    echo "Platform Information:"
+    echo "  Type: $project_type"
+    echo "  Category: $platform"
+    echo "  Language: $language"
+    echo "  Framework: $framework"
+
+    if is_mobile_project "$repo_root"; then
+        local target_sdk=$(get_mobile_config "target_sdk" "$repo_root")
+        local min_sdk=$(get_mobile_config "min_sdk" "$repo_root")
+        local deployment_target=$(get_mobile_config "deployment_target" "$repo_root")
+        local bundle_id=$(get_mobile_config "bundle_id" "$repo_root")
+
+        echo "  Mobile Config:"
+        [[ -n "$target_sdk" ]] && echo "    Target SDK: $target_sdk"
+        [[ -n "$min_sdk" ]] && echo "    Min SDK: $min_sdk"
+        [[ -n "$deployment_target" ]] && echo "    iOS Deployment Target: $deployment_target"
+        [[ -n "$bundle_id" ]] && echo "    Bundle ID: $bundle_id"
+    fi
+
+    echo "  CI Template: $(get_ci_template "$repo_root")"
+}

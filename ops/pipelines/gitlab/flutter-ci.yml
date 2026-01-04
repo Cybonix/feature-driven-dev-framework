@@ -1,0 +1,343 @@
+# Flutter CI/CD Pipeline for GitLab
+# Cross-platform builds for Android, iOS, and Web
+# Includes: lint, test, security scan, build, and deploy
+
+stages:
+    - validate
+    - test
+    - security
+    - build
+    - deploy
+
+variables:
+    FLUTTER_VERSION: "3.16.0"
+    JAVA_VERSION: "17"
+
+# Base Flutter job for Linux
+.flutter_base:
+    image: ghcr.io/cirruslabs/flutter:${FLUTTER_VERSION}
+    cache:
+        key: flutter-${CI_COMMIT_REF_SLUG}
+        paths:
+            - .pub-cache/
+            - build/
+        policy: pull-push
+    before_script:
+        - flutter --version
+        - flutter pub get
+
+# Base Flutter job for macOS (iOS builds)
+.flutter_macos:
+    tags:
+        - macos
+        - xcode
+    cache:
+        key: flutter-macos-${CI_COMMIT_REF_SLUG}
+        paths:
+            - .pub-cache/
+            - ios/Pods/
+        policy: pull-push
+    before_script:
+        - |
+            if ! command -v flutter &> /dev/null; then
+                git clone https://github.com/flutter/flutter.git -b stable ~/flutter
+                export PATH="$PATH:$HOME/flutter/bin"
+            fi
+        - flutter --version
+        - flutter pub get
+        - cd ios && pod install && cd ..
+
+# ============================================================================
+# VALIDATE STAGE
+# ============================================================================
+analyze:
+    stage: validate
+    extends: .flutter_base
+    script:
+        - flutter analyze --fatal-infos
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+format_check:
+    stage: validate
+    extends: .flutter_base
+    script:
+        - dart format --set-exit-if-changed .
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+custom_lint:
+    stage: validate
+    extends: .flutter_base
+    script:
+        - |
+            if grep -q "custom_lint" pubspec.yaml; then
+                dart run custom_lint
+            else
+                echo "custom_lint not configured, skipping"
+            fi
+    allow_failure: true
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+unit_tests:
+    stage: test
+    extends: .flutter_base
+    script:
+        - flutter test --coverage
+        - |
+            if command -v lcov &> /dev/null; then
+                lcov --summary coverage/lcov.info
+            fi
+    artifacts:
+        when: always
+        paths:
+            - coverage/
+        reports:
+            coverage_report:
+                coverage_format: cobertura
+                path: coverage/lcov.info
+        expire_in: 1 week
+    coverage: '/lines\.*: \d+\.\d+\%/'
+
+integration_tests:
+    stage: test
+    extends: .flutter_base
+    script:
+        - |
+            if [ -d "integration_test" ]; then
+                flutter test integration_test
+            else
+                echo "No integration tests found"
+            fi
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    allow_failure: true
+
+# ============================================================================
+# SECURITY STAGE
+# ============================================================================
+gitleaks:
+    stage: security
+    image:
+        name: zricethezav/gitleaks:latest
+        entrypoint: [""]
+    script:
+        - gitleaks detect --source . --verbose --no-git
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+trivy_scan:
+    stage: security
+    image:
+        name: aquasec/trivy:latest
+        entrypoint: [""]
+    script:
+        - trivy fs . --exit-code 1 --severity HIGH,CRITICAL --no-progress
+    allow_failure: false
+
+dependency_check:
+    stage: security
+    extends: .flutter_base
+    script:
+        - flutter pub outdated --json > outdated.json || true
+        - cat outdated.json
+    artifacts:
+        when: always
+        paths:
+            - outdated.json
+        expire_in: 1 week
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+build_android_debug:
+    stage: build
+    extends: .flutter_base
+    script:
+        - flutter build apk --debug
+    artifacts:
+        paths:
+            - build/app/outputs/flutter-apk/app-debug.apk
+        expire_in: 1 week
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build_android_release:
+    stage: build
+    extends: .flutter_base
+    script:
+        # Setup signing
+        - echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/keystore.jks
+        - |
+            cat > android/key.properties << EOF
+            storePassword=$ANDROID_KEYSTORE_PASSWORD
+            keyPassword=$ANDROID_KEY_PASSWORD
+            keyAlias=$ANDROID_KEY_ALIAS
+            storeFile=keystore.jks
+            EOF
+
+        # Build
+        - flutter build apk --release
+        - flutter build appbundle --release
+
+        # Cleanup
+        - rm android/keystore.jks android/key.properties
+    artifacts:
+        paths:
+            - build/app/outputs/flutter-apk/app-release.apk
+            - build/app/outputs/bundle/release/app-release.aab
+        expire_in: 4 weeks
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+build_ios_release:
+    stage: build
+    extends: .flutter_macos
+    script:
+        # Setup certificates
+        - security create-keychain -p "" build.keychain
+        - security default-keychain -s build.keychain
+        - security unlock-keychain -p "" build.keychain
+        - echo "$IOS_CERTIFICATE_BASE64" | base64 -d > certificate.p12
+        - security import certificate.p12 -k build.keychain -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        - security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
+        - rm certificate.p12
+
+        # Provisioning profile
+        - mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+        - echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+
+        # Build
+        - flutter build ios --release
+
+        # Archive and export
+        - cd ios
+        - |
+            xcodebuild archive \
+                -workspace Runner.xcworkspace \
+                -scheme Runner \
+                -archivePath ../build/ios/Runner.xcarchive \
+                -destination "generic/platform=iOS" \
+                -allowProvisioningUpdates
+
+        - |
+            cat > ../ExportOptions.plist << EOF
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+                <key>method</key>
+                <string>app-store</string>
+                <key>teamID</key>
+                <string>${APPLE_TEAM_ID}</string>
+            </dict>
+            </plist>
+            EOF
+
+        - |
+            xcodebuild -exportArchive \
+                -archivePath ../build/ios/Runner.xcarchive \
+                -exportPath ../build/ios/ipa \
+                -exportOptionsPlist ../ExportOptions.plist
+
+        # Cleanup
+        - security delete-keychain build.keychain
+    artifacts:
+        paths:
+            - build/ios/ipa/
+        expire_in: 4 weeks
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+build_web:
+    stage: build
+    extends: .flutter_base
+    script:
+        - flutter build web --release
+    artifacts:
+        paths:
+            - build/web/
+        expire_in: 1 week
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+# ============================================================================
+# DEPLOY STAGE
+# ============================================================================
+deploy_firebase_android:
+    stage: deploy
+    image: node:20
+    before_script:
+        - npm install -g firebase-tools
+    script:
+        - |
+            firebase appdistribution:distribute \
+                build/app/outputs/flutter-apk/app-release.apk \
+                --app $FIREBASE_APP_ID \
+                --groups "testers" \
+                --token "$FIREBASE_TOKEN"
+    dependencies:
+        - build_android_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "develop"'
+    environment:
+        name: firebase-android
+
+deploy_play_store:
+    stage: deploy
+    image: ruby:3.2
+    before_script:
+        - gem install fastlane
+        - echo "$PLAY_STORE_SERVICE_ACCOUNT" > play-store-key.json
+    script:
+        - |
+            fastlane supply \
+                --aab build/app/outputs/bundle/release/app-release.aab \
+                --track internal \
+                --json_key play-store-key.json \
+                --package_name $ANDROID_PACKAGE_NAME
+        - rm play-store-key.json
+    dependencies:
+        - build_android_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    environment:
+        name: play-store
+
+deploy_testflight:
+    stage: deploy
+    extends: .flutter_macos
+    script:
+        - |
+            xcrun altool --upload-app \
+                --type ios \
+                --file build/ios/ipa/*.ipa \
+                --apiKey "$APPSTORE_KEY_ID" \
+                --apiIssuer "$APPSTORE_ISSUER_ID"
+    dependencies:
+        - build_ios_release
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+          when: manual
+    environment:
+        name: testflight
+
+deploy_web:
+    stage: deploy
+    image: node:20
+    script:
+        - npm install -g firebase-tools
+        - firebase deploy --only hosting --token "$FIREBASE_TOKEN"
+    dependencies:
+        - build_web
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+    environment:
+        name: web-production
+        url: https://$FIREBASE_PROJECT_ID.web.app

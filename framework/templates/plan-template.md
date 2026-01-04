@@ -32,15 +32,34 @@
 [Extract from feature spec: primary requirement + technical approach from research]
 
 ## Technical Context
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: [e.g., Python 3.11, Swift 5.9, Kotlin 1.9, Dart 3.2, TypeScript 5.3 or NEEDS CLARIFICATION]
+**Primary Dependencies**: [e.g., FastAPI, SwiftUI, Jetpack Compose, Flutter, React 18 or NEEDS CLARIFICATION]
+**Storage**: [if applicable, e.g., PostgreSQL, CoreData, Room, Hive, IndexedDB or N/A]
+**Testing**: [e.g., pytest, XCTest, Espresso, flutter_test, Playwright or NEEDS CLARIFICATION]
+**Target Platform**: [e.g., Linux server, iOS 15+, Android API 24+, Web, Cross-platform or NEEDS CLARIFICATION]
+**Project Type**: [single/web/mobile/cross-platform - determines source structure]
+**Performance Goals**: [domain-specific, e.g., 1000 req/s, 60fps UI, cold start <2s, LCP <2.5s or NEEDS CLARIFICATION]
+**Constraints**: [domain-specific, e.g., <200ms p95, <100MB APK, offline-capable, bundle <500kb or NEEDS CLARIFICATION]
+**Scale/Scope**: [domain-specific, e.g., 10k users, 50 screens, 100k DAU or NEEDS CLARIFICATION]
+
+### Mobile-Specific Context *(include if type is android/ios/flutter/react-native)*
+**Build System**: [gradle, xcodebuild, flutter build, eas build or NEEDS CLARIFICATION]
+**App Architecture**: [MVVM, MVI, Clean Architecture, BLoC, Redux or NEEDS CLARIFICATION]
+**Navigation**: [Jetpack Navigation, SwiftUI NavigationStack, go_router, React Navigation or NEEDS CLARIFICATION]
+**State Management**: [ViewModel, Combine, Provider/Riverpod, Redux/Zustand or NEEDS CLARIFICATION]
+**CI/CD Provider**: [Fastlane, EAS, GitHub Actions, Bitrise or NEEDS CLARIFICATION]
+**Signing Configuration**: [debug, release, ad-hoc, app-store or NEEDS CLARIFICATION]
+**Min SDK/Deployment Target**: [Android API level, iOS version or NEEDS CLARIFICATION]
+**Bundle Identifier**: [com.company.app format or NEEDS CLARIFICATION]
+
+### Frontend-Specific Context *(include if type is frontend/pwa)*
+**Rendering Strategy**: [CSR, SSR, SSG, ISR or NEEDS CLARIFICATION]
+**Bundler**: [Vite, webpack, Turbopack, esbuild or NEEDS CLARIFICATION]
+**CSS Strategy**: [Tailwind, CSS Modules, styled-components, vanilla-extract or NEEDS CLARIFICATION]
+**PWA Features**: [offline support, push notifications, install prompt, none or NEEDS CLARIFICATION]
+**Performance Budget**: [LCP<2.5s, FID<100ms, CLS<0.1 or custom targets]
+**Browser Targets**: [modern browsers, IE11 support, specific versions or NEEDS CLARIFICATION]
+**SEO Requirements**: [SSR/SSG required, meta tags, sitemap or N/A]
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
@@ -90,7 +109,7 @@ framework/specs/[###-feature]/
 
 ### Source Code (repository root)
 ```
-# Option 1: Single project (DEFAULT)
+# Option 1: Single project (DEFAULT for libraries/CLIs/services)
 src/
 ├── models/
 ├── services/
@@ -123,9 +142,74 @@ api/
 
 ios/ or android/
 └── [platform-specific structure]
+
+# Option 4: Android Native (when type=android)
+app/
+├── src/main/
+│   ├── java/ or kotlin/
+│   │   └── com/example/app/
+│   │       ├── ui/           # Screens, Composables, Fragments
+│   │       ├── viewmodel/    # ViewModels
+│   │       ├── data/         # Repositories, DAOs
+│   │       ├── domain/       # Use cases (if Clean Architecture)
+│   │       └── di/           # Dependency injection modules
+│   └── res/                  # Resources (layouts, strings, drawables)
+├── src/test/                 # Unit tests
+├── src/androidTest/          # Instrumented tests
+└── build.gradle.kts
+
+# Option 5: iOS Native (when type=ios)
+App/
+├── Sources/
+│   ├── App/                  # App entry point, configuration
+│   ├── Features/             # Feature modules
+│   │   └── [FeatureName]/
+│   │       ├── Views/
+│   │       ├── ViewModels/
+│   │       └── Models/
+│   ├── Core/                 # Shared utilities, extensions
+│   └── Services/             # API clients, persistence
+├── Resources/                # Assets, localization
+├── Tests/                    # Unit tests
+├── UITests/                  # UI tests
+└── App.xcodeproj
+
+# Option 6: Flutter Cross-Platform (when type=flutter)
+lib/
+├── src/
+│   ├── app/                  # App configuration, routing
+│   ├── features/             # Feature modules
+│   │   └── [feature_name]/
+│   │       ├── presentation/ # Widgets, pages
+│   │       ├── domain/       # Entities, use cases
+│   │       └── data/         # Repositories, data sources
+│   └── core/                 # Shared utilities, themes
+├── test/                     # Unit and widget tests
+├── integration_test/         # Integration tests
+├── android/                  # Android-specific code
+├── ios/                      # iOS-specific code
+├── web/                      # Web-specific code
+└── pubspec.yaml
+
+# Option 7: React Native Cross-Platform (when type=react-native)
+src/
+├── app/                      # App entry, navigation setup
+├── screens/                  # Screen components
+├── components/               # Reusable UI components
+├── navigation/               # Navigation configuration
+├── store/                    # State management (Redux/Zustand)
+├── services/                 # API clients, utilities
+├── hooks/                    # Custom hooks
+└── types/                    # TypeScript types
+
+__tests__/                    # Jest tests
+e2e/                          # Detox E2E tests
+android/                      # Android-specific code
+ios/                          # iOS-specific code
+app.json                      # App configuration
 ```
 
-**Structure Decision**: [DEFAULT to Option 1 unless Technical Context indicates web/mobile app]
+**Structure Decision**: [DEFAULT to Option 1 unless Technical Context indicates web/mobile/cross-platform app]
 
 ## Phase 0: Outline & Research
 1. **Extract unknowns from Technical Context** above:

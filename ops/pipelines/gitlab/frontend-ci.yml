@@ -1,0 +1,406 @@
+# Enhanced Frontend CI/CD Pipeline for GitLab
+# Includes: lint, test, security, build, Lighthouse, bundle analysis, visual regression, browser compatibility
+
+stages:
+    - validate
+    - test
+    - security
+    - build
+    - quality
+    - deploy
+
+variables:
+    NODE_VERSION: "20"
+    LIGHTHOUSE_THRESHOLD: "80"
+
+# Base Node.js job
+.node_base:
+    image: node:${NODE_VERSION}
+    cache:
+        key: npm-${CI_COMMIT_REF_SLUG}
+        paths:
+            - node_modules/
+            - .npm/
+        policy: pull-push
+    before_script:
+        - npm ci
+
+# ============================================================================
+# VALIDATE STAGE
+# ============================================================================
+lint:
+    stage: validate
+    extends: .node_base
+    script:
+        - npm run lint || npx eslint . --ext .ts,.tsx,.js,.jsx
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+typescript:
+    stage: validate
+    extends: .node_base
+    script:
+        - npm run type-check || npx tsc --noEmit
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+prettier:
+    stage: validate
+    extends: .node_base
+    script:
+        - npm run format:check || npx prettier --check "src/**/*.{ts,tsx,js,jsx,css,scss}"
+    allow_failure: true
+
+stylelint:
+    stage: validate
+    extends: .node_base
+    script:
+        - npx stylelint "**/*.{css,scss}" || echo "Stylelint not configured"
+    allow_failure: true
+
+# ============================================================================
+# TEST STAGE
+# ============================================================================
+unit_tests:
+    stage: test
+    extends: .node_base
+    script:
+        - npm test -- --coverage --watchAll=false
+    artifacts:
+        when: always
+        paths:
+            - coverage/
+        reports:
+            coverage_report:
+                coverage_format: cobertura
+                path: coverage/cobertura-coverage.xml
+            junit: junit.xml
+        expire_in: 1 week
+    coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+
+# ============================================================================
+# SECURITY STAGE
+# ============================================================================
+gitleaks:
+    stage: security
+    image:
+        name: zricethezav/gitleaks:latest
+        entrypoint: [""]
+    script:
+        - gitleaks detect --source . --verbose --no-git
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+npm_audit:
+    stage: security
+    extends: .node_base
+    script:
+        - npm audit --production --audit-level=high
+    allow_failure: false
+
+trivy_scan:
+    stage: security
+    image:
+        name: aquasec/trivy:latest
+        entrypoint: [""]
+    script:
+        - trivy fs . --exit-code 1 --severity HIGH,CRITICAL --no-progress
+    allow_failure: false
+
+# ============================================================================
+# BUILD STAGE
+# ============================================================================
+build:
+    stage: build
+    extends: .node_base
+    script:
+        - npm run build
+    artifacts:
+        paths:
+            - dist/
+            - build/
+            - .next/
+            - out/
+            - .output/
+        expire_in: 1 week
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+        - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop"'
+
+# ============================================================================
+# QUALITY STAGE
+# ============================================================================
+bundle_analysis:
+    stage: quality
+    extends: .node_base
+    script:
+        - |
+            if grep -q "next" package.json; then
+                ANALYZE=true npm run build || npm run build
+            elif grep -q "vite" package.json; then
+                npm run build -- --mode production
+                npx vite-bundle-visualizer || true
+            else
+                npm run build -- --stats
+                npx webpack-bundle-analyzer dist/stats.json -m static -r bundle-report.html || true
+            fi
+        - |
+            if [ -d "dist" ]; then
+                BUNDLE_SIZE=$(du -sh dist | cut -f1)
+                echo "Total bundle size: $BUNDLE_SIZE"
+            fi
+    artifacts:
+        when: always
+        paths:
+            - bundle-report.html
+            - .next/analyze/
+            - stats.json
+        expire_in: 1 week
+    allow_failure: true
+    dependencies:
+        - build
+
+lighthouse:
+    stage: quality
+    image: node:${NODE_VERSION}
+    before_script:
+        - npm ci
+        - npm install -g lighthouse serve wait-on
+    script:
+        # Start server
+        - |
+            if grep -q "next" package.json; then
+                npm run start &
+            else
+                serve -s dist -l 3000 &
+            fi
+        - wait-on http://localhost:3000 --timeout 60000
+
+        # Run Lighthouse
+        - |
+            lighthouse http://localhost:3000 \
+                --output json \
+                --output html \
+                --output-path ./lighthouse-report \
+                --chrome-flags="--headless --no-sandbox --disable-gpu"
+
+        # Check scores
+        - |
+            PERF=$(cat lighthouse-report.json | jq '.categories.performance.score * 100')
+            A11Y=$(cat lighthouse-report.json | jq '.categories.accessibility.score * 100')
+            BP=$(cat lighthouse-report.json | jq '.categories["best-practices"].score * 100')
+            SEO=$(cat lighthouse-report.json | jq '.categories.seo.score * 100')
+
+            echo "Performance: $PERF"
+            echo "Accessibility: $A11Y"
+            echo "Best Practices: $BP"
+            echo "SEO: $SEO"
+    artifacts:
+        when: always
+        paths:
+            - lighthouse-report.*
+        expire_in: 1 week
+    dependencies:
+        - build
+    allow_failure: true
+
+visual_regression:
+    stage: quality
+    image: mcr.microsoft.com/playwright:v1.40.0-jammy
+    before_script:
+        - npm ci
+        - npx playwright install chromium
+    script:
+        # Start server
+        - npm install -g serve wait-on
+        - serve -s dist -l 3000 &
+        - wait-on http://localhost:3000 --timeout 60000
+
+        # Run visual tests
+        - npx playwright test --project=visual || npx playwright test
+    artifacts:
+        when: always
+        paths:
+            - test-results/
+            - playwright-report/
+        expire_in: 1 week
+    dependencies:
+        - build
+    allow_failure: true
+
+browser_chromium:
+    stage: quality
+    image: mcr.microsoft.com/playwright:v1.40.0-jammy
+    before_script:
+        - npm ci
+        - npx playwright install chromium
+    script:
+        - npm install -g serve wait-on
+        - serve -s dist -l 3000 &
+        - wait-on http://localhost:3000 --timeout 60000
+        - npx playwright test --project=chromium
+    artifacts:
+        when: always
+        paths:
+            - test-results/
+        expire_in: 1 week
+    dependencies:
+        - build
+    allow_failure: true
+
+browser_firefox:
+    stage: quality
+    image: mcr.microsoft.com/playwright:v1.40.0-jammy
+    before_script:
+        - npm ci
+        - npx playwright install firefox
+    script:
+        - npm install -g serve wait-on
+        - serve -s dist -l 3000 &
+        - wait-on http://localhost:3000 --timeout 60000
+        - npx playwright test --project=firefox
+    artifacts:
+        when: always
+        paths:
+            - test-results/
+        expire_in: 1 week
+    dependencies:
+        - build
+    allow_failure: true
+
+browser_webkit:
+    stage: quality
+    image: mcr.microsoft.com/playwright:v1.40.0-jammy
+    before_script:
+        - npm ci
+        - npx playwright install webkit
+    script:
+        - npm install -g serve wait-on
+        - serve -s dist -l 3000 &
+        - wait-on http://localhost:3000 --timeout 60000
+        - npx playwright test --project=webkit
+    artifacts:
+        when: always
+        paths:
+            - test-results/
+        expire_in: 1 week
+    dependencies:
+        - build
+    allow_failure: true
+
+accessibility:
+    stage: quality
+    image: node:${NODE_VERSION}
+    before_script:
+        - npm ci
+        - npm install -g @axe-core/cli pa11y serve wait-on
+    script:
+        - serve -s dist -l 3000 &
+        - wait-on http://localhost:3000 --timeout 60000
+        - axe http://localhost:3000 --exit || true
+        - pa11y http://localhost:3000 --reporter cli || true
+    dependencies:
+        - build
+    allow_failure: true
+
+pwa_validation:
+    stage: quality
+    extends: .node_base
+    script:
+        - |
+            MANIFEST=$(find dist public -name "manifest*.json" 2>/dev/null | head -1)
+            if [ -n "$MANIFEST" ]; then
+                echo "Found manifest: $MANIFEST"
+                cat "$MANIFEST" | jq .
+            else
+                echo "No PWA manifest found"
+            fi
+        - |
+            SW=$(find dist public -name "sw.js" -o -name "service-worker.js" 2>/dev/null | head -1)
+            if [ -n "$SW" ]; then
+                echo "Found service worker: $SW"
+            fi
+    dependencies:
+        - build
+    allow_failure: true
+
+# ============================================================================
+# DEPLOY STAGE
+# ============================================================================
+pages:
+    stage: deploy
+    image: alpine:latest
+    script:
+        - |
+            if [ -d "dist" ]; then
+                cp -r dist public
+            elif [ -d "build" ]; then
+                cp -r build public
+            elif [ -d "out" ]; then
+                cp -r out public
+            fi
+    artifacts:
+        paths:
+            - public
+    dependencies:
+        - build
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+    environment:
+        name: gitlab-pages
+        url: https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME
+
+deploy_preview:
+    stage: deploy
+    image: node:${NODE_VERSION}
+    before_script:
+        - npm install -g netlify-cli
+    script:
+        - |
+            DEPLOY_DIR="dist"
+            [ -d "build" ] && DEPLOY_DIR="build"
+            [ -d "out" ] && DEPLOY_DIR="out"
+
+            netlify deploy \
+                --dir=$DEPLOY_DIR \
+                --auth=$NETLIFY_AUTH_TOKEN \
+                --site=$NETLIFY_SITE_ID \
+                --message="Preview deploy from MR !$CI_MERGE_REQUEST_IID"
+    dependencies:
+        - build
+    rules:
+        - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    environment:
+        name: preview/$CI_COMMIT_REF_SLUG
+        url: $DEPLOY_URL
+    allow_failure: true
+
+deploy_production:
+    stage: deploy
+    image: node:${NODE_VERSION}
+    before_script:
+        - npm install -g netlify-cli
+    script:
+        - |
+            DEPLOY_DIR="dist"
+            [ -d "build" ] && DEPLOY_DIR="build"
+            [ -d "out" ] && DEPLOY_DIR="out"
+
+            netlify deploy \
+                --dir=$DEPLOY_DIR \
+                --auth=$NETLIFY_AUTH_TOKEN \
+                --site=$NETLIFY_SITE_ID \
+                --prod \
+                --message="Production deploy from $CI_COMMIT_SHA"
+    dependencies:
+        - build
+        - lighthouse
+    rules:
+        - if: '$CI_COMMIT_BRANCH == "main"'
+    environment:
+        name: production
+        url: $PRODUCTION_URL
+    allow_failure: true
