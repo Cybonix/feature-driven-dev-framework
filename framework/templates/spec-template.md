@@ -4,6 +4,7 @@
 **Created**: [DATE]  
 **Status**: Draft  
 **Input**: User description: "$ARGUMENTS"
+**Prompt Intake**: `ops/intake/prompt.md` | `ops/intake/clarifications.md`
 
 ## Execution Flow (main)
 ```

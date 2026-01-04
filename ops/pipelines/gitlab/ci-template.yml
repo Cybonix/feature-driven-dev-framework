@@ -1,0 +1,39 @@
+stages:
+    - validate
+    - test
+    - security
+    - build
+
+variables:
+    SECURE_LOG_LEVEL: "debug"
+
+validate:
+    stage: validate
+    script:
+        - echo "Running lint from ops/config.yml..."
+
+test:
+    stage: test
+    script:
+        - echo "Running test from ops/config.yml..."
+
+gitleaks:
+    stage: security
+    image:
+        name: zricethezav/gitleaks:latest
+        entrypoint: [""]
+    script:
+        - gitleaks detect --no-git --verbose
+
+trivy:
+    stage: security
+    image:
+        name: aquasec/trivy:latest
+        entrypoint: [""]
+    script:
+        - trivy fs . --exit-code 1 --severity HIGH,CRITICAL --no-progress
+
+build:
+    stage: build
+    script:
+        - echo "Running build from ops/config.yml..."

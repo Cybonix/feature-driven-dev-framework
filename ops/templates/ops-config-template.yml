@@ -1,0 +1,59 @@
+# Ops Configuration Template
+# Copy this to ops/config.yml and customize for your project
+
+project:
+    name: "[PROJECT_NAME]"
+    language: "generic"   # python | node | go | rust | java | generic
+    framework: "none"     # django | fastapi | react | express | none
+    type: "library"       # service | library | cli | frontend
+
+# Environments determine deployment strategies
+environments:
+    - name: "development"
+      branch: "feature/*"
+      deploy_strategy: "ephemeral"
+    - name: "staging"
+      branch: "develop"
+      deploy_strategy: "rolling"
+    - name: "production"
+      branch: "main"
+      deploy_strategy: "rolling"
+
+# Central Command Registry: Agents read this to know how to operate the repo
+# Update these commands to match your project's toolchain
+commands:
+    setup: "echo 'No setup defined'"
+    lint: "echo 'No lint defined'"
+    test: "echo 'No test defined'"
+    build: "echo 'No build defined'"
+    start: "echo 'No start defined'"
+
+# Security Configuration: Defines the gates for CI
+security:
+    sast:
+        tool: "trivy"
+        args: "fs ."
+        fail_on: "high,critical"
+    sca:
+        tool: "trivy"
+        args: "fs ."
+        fail_on: "high,critical"
+    secrets:
+        tool: "gitleaks"
+        args: "detect --no-git"
+        fail_on: "any"
+    compliance:
+        require_signed_commits: false
+        require_code_review: true
+
+# CI/CD Metadata
+ci_cd:
+    providers:
+        - "github"
+        - "gitlab"
+    stages:
+        - "validate"  # lint, format
+        - "test"      # unit, integration
+        - "security"  # sast, sca, secrets
+        - "build"     # compile, docker build
+        - "release"   # semantic release

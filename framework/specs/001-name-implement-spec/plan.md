@@ -1,7 +1,7 @@
 # Implementation Plan: Implement Spec-Driven Development
 
 **Branch**: `001-name-implement-spec` | **Date**: 2025-09-07 | **Spec**: [link](./spec.md)
-**Input**: Feature specification from `/specs/001-name-implement-spec/spec.md`
+**Input**: Feature specification from `/framework/specs/001-name-implement-spec/spec.md`
 
 ## Execution Flow (/plan command scope)
 ```
@@ -79,7 +79,7 @@ The user wants to implement a spec-driven development process. This will involve
 
 ### Documentation (this feature)
 ```
-specs/001-name-implement-spec/
+framework/specs/001-name-implement-spec/
 ├── plan.md              # This file (/plan command output)
 ├── research.md          # Phase 0 output (/plan command)
 ├── data-model.md        # Phase 1 output (/plan command)
@@ -165,7 +165,7 @@ tests/
 *This section describes what the /tasks command will do - DO NOT execute during /plan*
 
 **Task Generation Strategy**:
-- Load `/templates/tasks-template.md` as base
+- Load `/framework/templates/tasks-template.md` as base
 - Generate tasks from Phase 1 design docs (contracts, data model, quickstart)
 - Each contract → contract test task [P]
 - Each entity → model creation task [P]

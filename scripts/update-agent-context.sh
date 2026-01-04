@@ -2,13 +2,20 @@
 # Incrementally update agent context files based on new feature plan
 # Supports: CLAUDE.md, GEMINI.md, and .github/copilot-instructions.md
 # O(1) operation - only reads current context file and new plan.md
+#
+# Now also injects ops/config.yml content (commands, environments, security)
+# so agents know the project rules immediately.
 
 set -e
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-FEATURE_DIR="$REPO_ROOT/specs/$CURRENT_BRANCH"
+FEATURE_DIR="$REPO_ROOT/framework/specs/$CURRENT_BRANCH"
 NEW_PLAN="$FEATURE_DIR/plan.md"
+OPS_CONFIG="$REPO_ROOT/ops/config.yml"
+
+# Source common functions
+source "$REPO_ROOT/scripts/common.sh"
 
 # Determine which agent context files to update
 CLAUDE_FILE="$REPO_ROOT/CLAUDE.md"
@@ -24,6 +31,71 @@ if [ ! -f "$NEW_PLAN" ]; then
 fi
 
 echo "=== Updating agent context files for feature $CURRENT_BRANCH ==="
+
+# Generate ops context block for injection
+generate_ops_context() {
+    if [[ ! -f "$OPS_CONFIG" ]]; then
+        echo "<!-- No ops/config.yml found -->"
+        return
+    fi
+
+    python3 - "$OPS_CONFIG" << 'PYEOF'
+import sys
+import yaml
+
+try:
+    with open(sys.argv[1], 'r') as f:
+        config = yaml.safe_load(f)
+
+    print("## Ops Configuration")
+    print("")
+    print("### Project")
+    project = config.get('project', {})
+    print(f"- **Language**: {project.get('language', 'generic')}")
+    print(f"- **Framework**: {project.get('framework', 'none')}")
+    print(f"- **Type**: {project.get('type', 'library')}")
+    print("")
+
+    print("### Commands (use `scripts/run-task.sh <task>`)")
+    print("```")
+    commands = config.get('commands', {})
+    has_real_commands = False
+    for name, cmd in commands.items():
+        # Skip placeholder commands
+        if "No " in cmd and " defined" in cmd:
+            continue
+        print(f"{name}: {cmd}")
+        has_real_commands = True
+    if not has_real_commands:
+        print("# Commands not yet configured")
+    print("```")
+    print("")
+
+    print("### Environments")
+    envs = config.get('environments', [])
+    for env in envs:
+        name = env.get('name', 'unknown')
+        branch = env.get('branch', '*')
+        strategy = env.get('deploy_strategy', 'manual')
+        print(f"- **{name}**: branch `{branch}`, deploy: {strategy}")
+    print("")
+
+    print("### Security Gates (enforced by CI)")
+    security = config.get('security', {})
+    sast = security.get('sast', {})
+    secrets = security.get('secrets', {})
+    if sast:
+        print(f"- SAST: `{sast.get('tool', 'trivy')}` - fails on {sast.get('fail_on', 'high,critical')}")
+    if secrets:
+        print(f"- Secrets: `{secrets.get('tool', 'gitleaks')}` - fails on {secrets.get('fail_on', 'any')}")
+    print("")
+
+except Exception as e:
+    print(f"<!-- Error reading ops config: {e} -->")
+PYEOF
+}
+
+OPS_CONTEXT_BLOCK=$(generate_ops_context)
 
 # Extract tech from new plan
 NEW_LANG=$(grep "^**Language/Version**: " "$NEW_PLAN" 2>/dev/null | head -1 | sed 's/^**Language\/Version**: //' | grep -v "NEEDS CLARIFICATION" || echo "")
@@ -47,10 +119,10 @@ update_agent_file() {
         echo "Creating new $agent_name context file..."
         
         # Check if this is the SDD repo itself
-        if [ -f "$REPO_ROOT/templates/agent-file-template.md" ]; then
-            cp "$REPO_ROOT/templates/agent-file-template.md" "$temp_file"
+        if [ -f "$REPO_ROOT/framework/templates/agent-file-template.md" ]; then
+            cp "$REPO_ROOT/framework/templates/agent-file-template.md" "$temp_file"
         else
-            echo "ERROR: Template not found at $REPO_ROOT/templates/agent-file-template.md"
+            echo "ERROR: Template not found at $REPO_ROOT/framework/templates/agent-file-template.md"
             return 1
         fi
         
@@ -181,6 +253,49 @@ EOF
         fi
     fi
     
+    # Inject ops configuration block if not already present
+    if [[ -n "$OPS_CONTEXT_BLOCK" ]] && ! grep -q "## Ops Configuration" "$temp_file"; then
+        # Find a good insertion point (after Active Technologies or at end)
+        if grep -q "## Active Technologies" "$temp_file"; then
+            # Insert after Active Technologies section
+            sed -i.bak '/## Active Technologies/,/^## /{
+                /^## [^A]/i\
+'"$OPS_CONTEXT_BLOCK"'
+
+            }' "$temp_file" 2>/dev/null || {
+                # Fallback: append to end
+                echo "" >> "$temp_file"
+                echo "$OPS_CONTEXT_BLOCK" >> "$temp_file"
+            }
+            rm -f "$temp_file.bak"
+        else
+            # Append to end
+            echo "" >> "$temp_file"
+            echo "$OPS_CONTEXT_BLOCK" >> "$temp_file"
+        fi
+        echo "  - Injected ops/config.yml context"
+    elif grep -q "## Ops Configuration" "$temp_file"; then
+        # Update existing ops config block
+        python3 - "$temp_file" "$OPS_CONTEXT_BLOCK" << 'PYEOF'
+import sys
+import re
+
+filepath = sys.argv[1]
+new_block = sys.argv[2]
+
+with open(filepath, 'r') as f:
+    content = f.read()
+
+# Replace existing ops config section
+pattern = r'## Ops Configuration.*?(?=\n## [^O]|\n<!-- |\Z)'
+content = re.sub(pattern, new_block.strip() + '\n\n', content, flags=re.DOTALL)
+
+with open(filepath, 'w') as f:
+    f.write(content)
+PYEOF
+        echo "  - Updated ops/config.yml context"
+    fi
+
     # Move temp file to final location
     mv "$temp_file" "$target_file"
     echo "✅ $agent_name context file updated successfully"

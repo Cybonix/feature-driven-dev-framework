@@ -6,6 +6,93 @@ get_repo_root() {
     git rev-parse --show-toplevel
 }
 
+# Parse a value from ops/config.yml
+# Usage: get_ops_config "project.language" -> returns "python"
+#        get_ops_config "commands.test" -> returns the test command
+get_ops_config() {
+    local key="$1"
+    local repo_root="${2:-$(get_repo_root)}"
+    local config_file="$repo_root/ops/config.yml"
+
+    if [[ ! -f "$config_file" ]]; then
+        echo ""
+        return 1
+    fi
+
+    # Use yq if available (preferred), otherwise fallback to Python
+    if command -v yq &> /dev/null; then
+        yq -r ".$key // empty" "$config_file" 2>/dev/null
+    elif command -v python3 &> /dev/null; then
+        python3 - "$config_file" "$key" << 'PYEOF'
+import sys
+import yaml
+
+config_file = sys.argv[1]
+key_path = sys.argv[2]
+
+try:
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Navigate nested keys (e.g., "project.language")
+    value = config
+    for part in key_path.split('.'):
+        if isinstance(value, dict):
+            value = value.get(part)
+        else:
+            value = None
+            break
+
+    if value is not None:
+        print(value)
+except Exception:
+    pass
+PYEOF
+    else
+        # Fallback: simple grep for top-level keys
+        grep "^${key}:" "$config_file" 2>/dev/null | sed 's/^[^:]*: *//' | tr -d '"'
+    fi
+}
+
+# Get the full ops config as environment variables
+# Usage: eval $(export_ops_config)
+export_ops_config() {
+    local repo_root="${1:-$(get_repo_root)}"
+    local config_file="$repo_root/ops/config.yml"
+
+    if [[ ! -f "$config_file" ]]; then
+        return 1
+    fi
+
+    python3 - "$config_file" << 'PYEOF'
+import sys
+import yaml
+import os
+
+config_file = sys.argv[1]
+
+try:
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f)
+
+    # Export project settings
+    project = config.get('project', {})
+    print(f"OPS_PROJECT_NAME='{project.get('name', '')}'")
+    print(f"OPS_PROJECT_LANGUAGE='{project.get('language', 'generic')}'")
+    print(f"OPS_PROJECT_FRAMEWORK='{project.get('framework', 'none')}'")
+    print(f"OPS_PROJECT_TYPE='{project.get('type', 'library')}'")
+
+    # Export commands
+    commands = config.get('commands', {})
+    for cmd_name, cmd_value in commands.items():
+        safe_name = cmd_name.upper().replace('-', '_')
+        print(f"OPS_CMD_{safe_name}='{cmd_value}'")
+
+except Exception as e:
+    print(f"# Error: {e}", file=sys.stderr)
+PYEOF
+}
+
 # Get current branch
 get_current_branch() {
     git rev-parse --abbrev-ref HEAD
@@ -27,7 +114,7 @@ check_feature_branch() {
 get_feature_dir() {
     local repo_root="$1"
     local branch="$2"
-    echo "$repo_root/specs/$branch"
+    echo "$repo_root/framework/specs/$branch"
 }
 
 # Get all standard paths for a feature

@@ -1,6 +1,6 @@
-# Project Overview
+# Feature-Driven Development Framework
 
-This repository provides a framework for **feature-driven development** driven by specifications, plans, and automated scripts. It is organized to help teams scaffold new features, manage implementation tasks, and enforce consistent standards across the codebase.
+A comprehensive framework for **feature-driven development** with integrated **DevOps automation** and **AI agent support**. This framework bridges the gap between specification, implementation, and operations—enabling both human developers and AI agents (Claude Code, Gemini CLI, GitHub Copilot) to work seamlessly with a unified configuration.
 
 ---
 
@@ -9,7 +9,9 @@ This repository provides a framework for **feature-driven development** driven b
 - [Project Overview](#project-overview)
 - [Repository Structure](#repository-structure)
 - [Getting Started](#getting-started)
+- [Ops Configuration](#ops-configuration)
 - [Feature Workflow](#feature-workflow)
+- [Agentic Workflow](#agentic-workflow)
 - [Scripts & Utilities](#scripts--utilities)
 - [Templates](#templates)
 - [Testing & Validation](#testing--validation)
@@ -23,84 +25,224 @@ This repository provides a framework for **feature-driven development** driven b
 
 ```
 .
-├── AGENTS.md                     # Repository guidelines and conventions
+├── AGENTS.md                     # Repository guidelines for AI agents
+├── CLAUDE.md / GEMINI.md         # Agent-specific context files (auto-generated)
+│
+├── ops/                          # DevOps Foundation (Agent-Ready)
+│   ├── config.yml                # Central configuration (language, commands, security)
+│   ├── intake/                   # Prompt intake artifacts
+│   ├── pipelines/                # CI/CD templates
+│   │   ├── github/ci-template.yml
+│   │   └── gitlab/ci-template.yml
+│   ├── policies/                 # Security baselines (trivy, gitleaks mandated)
+│   │   └── security.md
+│   ├── observability/            # Logging/metrics/tracing standards
+│   ├── release/                  # Release and versioning policies
+│   ├── runbooks/                 # Incident and rollback templates
+│   └── templates/                # Ops config templates
+│
+├── framework/                    # Feature-Driven Development
+│   ├── specs/                    # Feature folders (one per spec)
+│   │   └── <NNN-short-slug>/
+│   │       ├── spec.md           # Feature specification
+│   │       ├── plan.md           # Implementation plan
+│   │       ├── tasks.md          # Task breakdown (optional)
+│   │       ├── research.md       # Research notes (optional)
+│   │       ├── data-model.md     # Data model (optional)
+│   │       ├── contracts/        # API contracts (optional)
+│   │       └── quickstart.md     # Quick start guide (optional)
+│   ├── plans/                    # Implementation plans (optional grouping)
+│   ├── tasks/                    # Task lists (optional grouping)
+│   └── templates/                # Markdown scaffolding templates
+│
+├── scripts/                      # Automation Bridge
+│   ├── common.sh                 # Shared functions + ops config parsing
+│   ├── run-task.sh               # Command resolver (abstracts toolchain)
+│   ├── normalize-prompt.sh       # Prompt intake with ops context
+│   ├── create-new-feature.sh     # Feature branch scaffolding
+│   ├── setup-plan.sh             # Plan generation
+│   ├── update-agent-context.sh   # Inject ops config into agent files
+│   ├── check-devops-compliance.sh
+│   └── ...
+│
 ├── memory/                       # Team/process documentation
-│   ├── constitution.md           # Core principles and governance
-│   └── constitution_update_checklist.md
-├── scripts/                      # Bash utilities for scaffolding & maintenance
-│   ├── check-task-prerequisites.sh
-│   ├── common.sh
-│   ├── create-new-feature.sh
-│   ├── get-feature-paths.sh
-│   ├── setup-plan.sh
-│   └── update-agent-context.sh
-├── specs/                        # Feature folders (one per spec)
-│   └── <NNN‑short‑slug>/
-│       ├── spec.md               # Feature specification
-│       ├── plan.md               # Implementation plan
-│       ├── tasks.md (optional)   # Task breakdown
-│       ├── research.md (optional)
-│       ├── data-model.md (optional)
-│       ├── contracts/ (optional) # Contract files for integration
-│       └── quickstart.md (optional)
-├── templates/                    # Markdown scaffolding templates
-│   ├── agent-file-template.md
-│   ├── plan-template.md
-│   ├── spec-template.md
-│   └── tasks-template.md
-└── .gemini/commands/            # CLI command specs (e.g., specify.toml)
+│   └── constitution.md           # Core principles and governance
+│
+└── .gemini/commands/             # Gemini CLI command specs
 ```
 
 ### Key Directories
 
-- **`specs/`** – Contains a folder per feature, named using the convention `NNN-short-slug` where `NNN` is the incremental spec number. Each folder holds the specification, plan, and any auxiliary documents.
-- **`templates/`** – Provides Markdown templates used by the scripts to scaffold new specs, plans, and tasks.
-- **`scripts/`** – Bash helpers that automate repetitive tasks such as creating a new feature branch, generating a plan, and validating prerequisites.
-- **`memory/`** – Stores team agreements, the project constitution, and other reference material.
-- **`AGENTS.md`** – Centralized guidelines for repository usage, coding style, and commit conventions.
+| Directory | Purpose |
+|-----------|---------|
+| **`ops/`** | DevOps foundation: central config, pipelines, security policies, runbooks |
+| **`ops/config.yml`** | **Central configuration** read by all scripts and agents |
+| **`framework/`** | Feature-driven development: specs, plans, tasks |
+| **`framework/specs/`** | Feature folders using `NNN-short-slug` naming convention |
+| **`scripts/`** | Automation bridge between framework and ops |
+| **`memory/`** | Team governance and constitution |
+| **`AGENTS.md`** | Repository guidelines for AI agents |
 
 ---
 
 ## Getting Started
 
-1. **Clone the repository**
-   ```bash
-   git clone <repo-url>
-   cd <repo-directory>
-   ```
-2. **Ensure required tools are installed**
-   - Bash 4+ (`#!/usr/bin/env bash`)
-   - Git
-   - Optional: `shellcheck` for linting scripts
-3. **Run a quick lint of the scripts**
-   ```bash
-   bash -n scripts/*.sh
-   # If you have shellcheck installed
-   shellcheck scripts/*.sh
-   ```
+### 1. Clone and Setup
+
+```bash
+git clone <repo-url>
+cd <repo-directory>
+```
+
+### 2. Prerequisites
+
+- **Bash 4+** (`#!/usr/bin/env bash`)
+- **Git**
+- **Python 3** with PyYAML (`pip install pyyaml`) — for config parsing
+- Optional: `yq` for faster YAML parsing
+- Optional: `shellcheck` for script linting
+
+### 3. Initialize DevOps Foundation
+
+```bash
+# Scaffold DevOps assets (pipelines, policies, config)
+bash scripts/setup-devops.sh
+
+# Verify compliance
+bash scripts/check-devops-compliance.sh
+```
+
+### 4. Configure Your Project
+
+Edit `ops/config.yml` to match your project:
+
+```yaml
+project:
+    name: "my-project"
+    language: "python"      # python, node, go, rust, java, generic
+    framework: "fastapi"    # django, react, none, etc.
+    type: "service"         # service, library, cli, frontend
+
+commands:
+    setup: "pip install -e .[dev]"
+    lint: "ruff check ."
+    test: "pytest"
+    build: "python -m build"
+    start: "uvicorn main:app"
+```
+
+### 5. Validate Setup
+
+```bash
+# List available commands from config
+bash scripts/run-task.sh --list
+
+# Run a task (abstracted from underlying toolchain)
+bash scripts/run-task.sh test
+```
+
+---
+
+## Ops Configuration
+
+The `ops/config.yml` file is the **single source of truth** for project configuration. All scripts and AI agents read this file to understand how to interact with the project.
+
+### Configuration Schema
+
+```yaml
+# Project metadata
+project:
+    name: "project-name"
+    language: "python"       # python | node | go | rust | java | generic
+    framework: "none"        # django | fastapi | react | express | none
+    type: "library"          # service | library | cli | frontend
+
+# Environment definitions (for deployment strategies)
+environments:
+    - name: "development"
+      branch: "feature/*"
+      deploy_strategy: "ephemeral"
+    - name: "production"
+      branch: "main"
+      deploy_strategy: "rolling"
+
+# Command registry (agents use run-task.sh to execute these)
+commands:
+    setup: "pip install -e .[dev]"
+    lint: "ruff check ."
+    test: "pytest"
+    build: "python -m build"
+    start: "python -m myapp"
+
+# Security gates (enforced by CI)
+security:
+    sast:
+        tool: "trivy"
+        args: "fs ."
+        fail_on: "high,critical"
+    secrets:
+        tool: "gitleaks"
+        args: "detect --no-git"
+        fail_on: "any"
+```
+
+### Using the Configuration
+
+**From scripts:**
+```bash
+source scripts/common.sh
+
+# Get a single value
+get_ops_config "project.language"    # -> "python"
+get_ops_config "commands.test"       # -> "pytest"
+
+# Export all as environment variables
+eval $(export_ops_config)
+echo $OPS_PROJECT_LANGUAGE           # -> "python"
+echo $OPS_CMD_TEST                   # -> "pytest"
+```
+
+**Run tasks without knowing the toolchain:**
+```bash
+# Instead of remembering: npm test vs pytest vs cargo test
+bash scripts/run-task.sh test
+
+# Works for any configured command
+bash scripts/run-task.sh lint
+bash scripts/run-task.sh build
+```
 
 ---
 
 ## Feature Workflow
 
-The repository follows a **spec‑first** approach:
+The repository follows a **spec-first** approach:
 
-1. **Create a new feature** – This will create a Git branch and a corresponding folder under `specs/`.
+1. **Normalize the prompt** – Capture the raw prompt and generate intake artifacts.
+   ```bash
+   bash scripts/normalize-prompt.sh --prompt "User signup flow"
+   ```
+   The script:
+   - Writes `ops/intake/prompt.md` and `ops/intake/clarifications.md`.
+   - Scaffolds `ops/config.yml` if missing.
+   - Creates a new feature branch and spec folder.
+
+2. **Create a new feature** (optional) – This creates a Git branch and a corresponding folder under `framework/specs/`.
    ```bash
    bash scripts/create-new-feature.sh "User signup flow"
    ```
    The script:
    - Generates a new branch named `NNN-user-signup-flow` (incrementing `NNN`).
-   - Copies the spec, plan, and tasks templates into `specs/NNN-user-signup-flow/`.
+   - Copies the spec, plan, and tasks templates into `framework/specs/NNN-user-signup-flow/`.
    - Checks out the new branch.
 
-2. **Write the specification** – Edit `specs/NNN‑user-signup-flow/spec.md` describing the feature, acceptance criteria, and any UI/UX mockups.
+3. **Write the specification** – Edit `framework/specs/NNN‑user-signup-flow/spec.md` describing the feature, acceptance criteria, and any UI/UX mockups.
 
 3. **Scaffold an implementation plan** – Once the spec is approved, generate a concrete plan:
    ```bash
    bash scripts/setup-plan.sh
    ```
-   The script reads the spec and creates `plan.md` using `templates/plan-template.md`.
+   The script reads the spec and creates `plan.md` using `framework/templates/plan-template.md`.
 
 4. **Validate task prerequisites** – Before starting implementation, verify that all required documents are present:
    ```bash
@@ -114,34 +256,132 @@ The repository follows a **spec‑first** approach:
    git commit -m "feat(specs): implement user signup"
    ```
 
-6. **Run tests & lint** – Ensure scripts remain valid and any added code passes tests.
+6. **Run tests & lint** – Use the command resolver to run project tasks:
    ```bash
+   # Run tests (uses command from ops/config.yml)
+   bash scripts/run-task.sh test
+
+   # Run linting
+   bash scripts/run-task.sh lint
+
+   # Validate scripts
    bash -n scripts/*.sh
-   # Add project‑specific test commands here
    ```
 
 7. **Open a Pull Request** – Follow the PR guidelines in `AGENTS.md` (title, description, sample command output, etc.).
 
 ---
 
+## Agentic Workflow
+
+This framework is designed to work seamlessly with AI coding agents. The `ops/config.yml` configuration and standardized scripts provide a consistent interface that agents can understand and use.
+
+### Supported Agents
+
+| Agent | Context File | Update Command |
+|-------|--------------|----------------|
+| **Claude Code** | `CLAUDE.md` | `bash scripts/update-agent-context.sh claude` |
+| **Gemini CLI** | `GEMINI.md` | `bash scripts/update-agent-context.sh gemini` |
+| **GitHub Copilot** | `.github/copilot-instructions.md` | `bash scripts/update-agent-context.sh copilot` |
+
+### How Agents Use This Framework
+
+1. **Read project config** – Agents read `ops/config.yml` to understand the project:
+   - Language and framework
+   - Available commands (test, lint, build, etc.)
+   - Security requirements
+
+2. **Execute tasks via command resolver** – Instead of guessing `npm test` vs `pytest`:
+   ```bash
+   bash scripts/run-task.sh test    # Runs whatever is configured
+   bash scripts/run-task.sh lint    # Language-agnostic
+   ```
+
+3. **Automatic context injection** – When a feature plan is created, `update-agent-context.sh` automatically injects:
+   - Project language/framework
+   - Available commands
+   - Environment definitions
+   - Security gates
+
+### Agent Context Auto-Population
+
+When you run `scripts/update-agent-context.sh`, it reads `ops/config.yml` and injects a block like this into agent context files:
+
+```markdown
+## Ops Configuration
+
+### Project
+- **Language**: python
+- **Framework**: fastapi
+- **Type**: service
+
+### Commands (use `scripts/run-task.sh <task>`)
+```
+setup: pip install -e .[dev]
+lint: ruff check .
+test: pytest
+```
+
+### Security Gates (enforced by CI)
+- SAST: `trivy` - fails on high,critical
+- Secrets: `gitleaks` - fails on any
+```
+
+### Prompt Intake with Ops Context
+
+When using `normalize-prompt.sh`, the script automatically reads `ops/config.yml` and:
+- Pre-fills clarifications with known project settings
+- Provides language-specific context to the intake artifacts
+- Displays detected configuration:
+
+```bash
+$ bash scripts/normalize-prompt.sh --prompt "Add user authentication"
+--- Ops Configuration Detected ---
+Language: python
+Framework: fastapi
+Type: service
+----------------------------------
+Prompt normalized to ops/intake
+```
+
+---
+
 ## Scripts & Utilities
+
+### Core Framework Scripts
 
 | Script | Purpose | Key Options |
 |--------|---------|-------------|
-| `create-new-feature.sh` | Creates a new feature branch and spec folder. | `"Feature description"` |
-| `setup-plan.sh` | Generates a `plan.md` from the spec using the plan template. | None |
-| `check-task-prerequisites.sh` | Checks that required/optional docs exist for the current spec. | `--json` for machine‑readable output |
-| `get-feature-paths.sh` | Prints absolute paths for the current spec folder, plan, and tasks. | None |
-| `update-agent-context.sh` | Updates agent context files for Claude, Gemini, or Copilot agents. | `claude|gemini|copilot` |
-| `common.sh` | Shared helper functions used by the other scripts. | – |
+| `normalize-prompt.sh` | Captures prompt intake with ops context, scaffolds feature spec | `--prompt` or `--file` |
+| `create-new-feature.sh` | Creates a new feature branch and spec folder | `"Feature description"` |
+| `setup-plan.sh` | Generates `plan.md` from the spec template | None |
+| `check-task-prerequisites.sh` | Validates required/optional docs for current spec | `--json` |
+| `get-feature-paths.sh` | Prints absolute paths for spec folder, plan, tasks | None |
+| `migrate-plan-paths.sh` | Updates legacy plan.md path references | None |
+| `update-agent-context.sh` | Injects ops config into agent context files | `claude\|gemini\|copilot` |
 
-All scripts adhere to the coding style defined in `AGENTS.md` (4‑space indentation, `set -e`, quoted variables, `[[ … ]]` tests, etc.).
+### Ops Integration Scripts
+
+| Script | Purpose | Key Options |
+|--------|---------|-------------|
+| **`run-task.sh`** | **Command resolver** - runs tasks from ops/config.yml | `<task>`, `--list`, `--dry-run` |
+| `setup-devops.sh` | Scaffolds DevOps config and CI/CD pipeline files | None |
+| `check-devops-compliance.sh` | Validates required DevOps artifacts | `--json` |
+| `get-devops-paths.sh` | Prints absolute paths for DevOps assets | None |
+
+### Shared Utilities
+
+| Script | Purpose |
+|--------|---------|
+| `common.sh` | Shared functions: `get_ops_config()`, `export_ops_config()`, path helpers |
+
+All scripts adhere to the coding style defined in `AGENTS.md` (4-space indentation, `set -e`, quoted variables, `[[ … ]]` tests).
 
 ---
 
 ## Templates
 
-The `templates/` directory contains Markdown skeletons used by the scripts:
+The `framework/templates/` directory contains Markdown skeletons used by the scripts:
 
 - **`spec-template.md`** – Outline for a feature specification (summary, goals, UI, API, acceptance criteria).
 - **`plan-template.md`** – Structure for an implementation plan (architecture, steps, risks, rollout).
@@ -154,18 +394,44 @@ Feel free to modify these templates to match your team's preferred documentation
 
 ## Testing & Validation
 
-1. **Script linting** – As shown earlier, run `bash -n` and optionally `shellcheck`.
-2. **Specification validation** – There is currently no automated spec validator, but you can add one (e.g., a Markdown linter) and include it in the CI pipeline.
-3. **CI Integration** – Recommended CI steps:
-   - Lint all Bash scripts.
-   - Verify that every spec folder contains at least `spec.md` and `plan.md`.
-   - Run any project‑specific unit or integration tests.
+### Quick Validation
+
+```bash
+# 1. Validate all scripts
+bash -n scripts/*.sh
+
+# 2. Check DevOps compliance
+bash scripts/check-devops-compliance.sh
+
+# 3. List available tasks
+bash scripts/run-task.sh --list
+
+# 4. Run project tests (if configured)
+bash scripts/run-task.sh test
+
+# 5. Run linting (if configured)
+bash scripts/run-task.sh lint
+```
+
+### CI Integration
+
+Recommended CI pipeline steps:
+
+1. **Lint Bash scripts**: `bash -n scripts/*.sh && shellcheck scripts/*.sh`
+2. **DevOps compliance**: `bash scripts/check-devops-compliance.sh`
+3. **Security scans** (per `ops/policies/security.md`):
+   - `gitleaks detect --no-git` (secrets)
+   - `trivy fs .` (SAST/SCA)
+4. **Run project tests**: `bash scripts/run-task.sh test`
+5. **Run project lint**: `bash scripts/run-task.sh lint`
+
+See `ops/pipelines/github/ci-template.yml` and `ops/pipelines/gitlab/ci-template.yml` for ready-to-use pipeline definitions.
 
 ---
 
 ## Contribution Guidelines
 
-- **Branch naming** – Use the format `NNN-short-slug` (e.g., `005-payment-gateway`). The number should be sequential based on existing folders in `specs/`.
+- **Branch naming** – Use the format `NNN-short-slug` (e.g., `005-payment-gateway`). The number should be sequential based on existing folders in `framework/specs/`.
 - **Commit messages** – Follow Conventional Commits (see `AGENTS.md`). Example:
   ```
   feat(specs): scaffold 006-notifications

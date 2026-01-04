@@ -5,9 +5,9 @@ When amending the constitution (`/memory/constitution.md`), ensure all dependent
 ## Templates to Update
 
 ### When adding/modifying ANY article:
-- [ ] `/templates/plan-template.md` - Update Constitution Check section
-- [ ] `/templates/spec-template.md` - Update if requirements/scope affected
-- [ ] `/templates/tasks-template.md` - Update if new task types needed
+- [ ] `/framework/templates/plan-template.md` - Update Constitution Check section
+- [ ] `/framework/templates/spec-template.md` - Update if requirements/scope affected
+- [ ] `/framework/templates/tasks-template.md` - Update if new task types needed
 - [ ] `/.claude/commands/plan.md` - Update if planning process changes
 - [ ] `/.claude/commands/tasks.md` - Update if task generation affected
 - [ ] `/CLAUDE.md` - Update runtime development guidelines
