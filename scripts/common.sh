@@ -25,7 +25,11 @@ get_ops_config() {
     elif command -v python3 &> /dev/null; then
         python3 - "$config_file" "$key" << 'PYEOF'
 import sys
-import yaml
+try:
+    import yaml
+except ImportError:
+    print("Error: PyYAML is required. Please run: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
 
 config_file = sys.argv[1]
 key_path = sys.argv[2]
@@ -66,8 +70,12 @@ export_ops_config() {
 
     python3 - "$config_file" << 'PYEOF'
 import sys
-import yaml
 import os
+try:
+    import yaml
+except ImportError:
+    print("# Error: PyYAML is required. Please run: pip install pyyaml", file=sys.stderr)
+    sys.exit(1)
 
 config_file = sys.argv[1]
 

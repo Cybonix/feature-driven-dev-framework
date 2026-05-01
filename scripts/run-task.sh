@@ -11,8 +11,6 @@
 # the given task name. Agents use this to interact with the project
 # without needing to know if it's npm, cargo, gradle, etc.
 
-set -e
-
 REPO_ROOT=$(git rev-parse --show-toplevel)
 source "$REPO_ROOT/scripts/common.sh"
 
@@ -137,7 +135,8 @@ fi
 COMMAND=$(get_command "$TASK_NAME")
 
 if [[ -z "$COMMAND" ]]; then
-    echo -e "${RED}ERROR: Unknown task '$TASK_NAME'.${NC}" >&2
+    echo -e "${RED}ERROR: No command defined for task '$TASK_NAME'.${NC}" >&2
+    echo "Please update ops/config.yml to define the command, or set a supported language for defaults."
     echo ""
     echo "Available tasks:"
     list_commands

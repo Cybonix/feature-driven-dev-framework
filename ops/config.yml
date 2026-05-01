@@ -27,24 +27,24 @@ environments:
 # Central Command Registry: Agents read this to know how to operate the repo
 commands:
     # Core commands (all project types)
-    setup: "echo 'No setup defined'"
-    lint: "echo 'No lint defined'"
-    test: "echo 'No test defined'"
-    build: "echo 'No build defined'"
-    start: "echo 'No start defined'"
+    setup: ""
+    lint: ""
+    test: ""
+    build: ""
+    start: ""
 
     # Mobile-specific commands (used when type is android|ios|react-native|flutter)
-    build_android: "echo 'No Android build defined'"
-    build_ios: "echo 'No iOS build defined'"
-    deploy_testflight: "echo 'No TestFlight deploy defined'"
-    deploy_play_store: "echo 'No Play Store deploy defined'"
-    deploy_firebase: "echo 'No Firebase App Distribution deploy defined'"
+    build_android: ""
+    build_ios: ""
+    deploy_testflight: ""
+    deploy_play_store: ""
+    deploy_firebase: ""
 
     # Frontend-specific commands (used when type is frontend|pwa)
-    lighthouse: "echo 'No lighthouse audit defined'"
-    bundle_analyze: "echo 'No bundle analysis defined'"
-    visual_test: "echo 'No visual testing defined'"
-    e2e: "echo 'No e2e testing defined'"
+    lighthouse: ""
+    bundle_analyze: ""
+    visual_test: ""
+    e2e: ""
 
 # Security Configuration: Defines the gates for CI
 security:
